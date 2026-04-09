@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package flare.access_gateway.v1;
+
+option go_package = "github.com/flare-labs/flare/proto/access_gateway;access_gateway";
+
+import "google/protobuf/timestamp.proto";
+import "ack.proto";
+import "data.proto";
+import "errors.proto";
+import "event.proto";
+import "metadata.proto";
+import "message.proto";
+import "notification.proto";
+
+// =============================================================================
+// AccessGateway（业务系统 → 网关：推送与连接查询）
+// =============================================================================
+// 业务侧 gRPC：推送消息/事件/通知/ACK/自定义数据；复用 common 标准类型。
+// 网关与客户端之间通过 PayloadCommand 传输，本服务不直接使用 PayloadCommand。
+// 复用：Message、Event、NotificationMessage、Ack、CustomData。
+
+// ----------------------------------------------------------------------------
+// 推送选项（与飞书/微信风格对齐：优先级、离线推送、设备/平台过滤、顺序与幂等）
+// ----------------------------------------------------------------------------
+
+message PushOptions {
+  bool require_ack = 1;       // 是否要求客户端回传 ACK（对应 common/ack PushAck）
+  int32 priority = 2;         // 0-9，越大越高；与 common/metadata DevicePriority 语义一致时可映射
+  int64 expire_at_ms = 3;     // 过期时间戳（毫秒），过期则不投递
+  bool offline_push = 4;      // 离线时是否走第三方推送（APNs/FCM 等）
+  repeated string device_ids = 5;   // 仅推送给指定设备，空=该用户全部在线设备
+  repeated string platforms = 6;    // 仅推送给指定平台（ios/android/web/pc），空=全部
+  DeliveryMode delivery_mode = 7;  // 投递语义：最多一次 / 至少一次 / 精确一次
+  bool allow_duplicate = 8;   // 是否允许重复投递（去重由业务或 msg_id/event_id 保证）
+  bool enforce_order = 9;     // 是否严格按 seq/顺序投递（会话内有序）
+  string shard_key = 10;      // 分片键（如 user_id），用于网关路由
+}
+
+enum DeliveryMode {
+  DELIVERY_MODE_UNSPECIFIED = 0;
+  AT_MOST_ONCE = 1;   // 最多一次（不重试，适合状态类）
+  AT_LEAST_ONCE = 2;  // 至少一次（推荐，可重试）
+  EXACTLY_ONCE = 3;   // 精确一次（需业务幂等键，如 server_msg_id）
+}
+
+// ----------------------------------------------------------------------------
+// 推送结果（统一返回：成功数、待离线数、window_id 供客户端 PushAck 关联）
+// ----------------------------------------------------------------------------
+
+message PushResult {
+  int32 pushed_device_count = 1;   // 已推送到在线设备数
+  int32 offline_pending_count = 2;  // 离线待推送数（若开启 offline_push）
+  string window_id = 3;            // 本批 window_id，客户端回传 PushAck 时携带
+  google.protobuf.Timestamp at = 4; // 服务端处理时间
+}
+
+// 单用户推送明细（多用户推送时可选返回）
+message UserPushResult {
+  string user_id = 1;
+  PushResult result = 2;
+}
+
+// ----------------------------------------------------------------------------
+// 服务定义
+// ----------------------------------------------------------------------------
+
+service AccessGateway {
+  // 推送单条或批量消息（common.Message）
+  rpc PushMessage(PushMessageRequest) returns (PushResponse);
+  // 推送领域事件（common.Event，如已读、撤回、会话更新等）
+  rpc PushEvent(PushEventRequest) returns (PushResponse);
+  // 推送通用通知（common.NotificationMessage，系统/广播/告警/连接等）
+  rpc PushNotification(PushNotificationRequest) returns (PushNotificationResponse);
+  // 推送 ACK（如 SendAck/EventAck，由网关转交目标连接）
+  rpc PushAck(PushAckRequest) returns (PushAckResponse);
+  // 推送自定义数据（common.CustomData，不占会话 seq、不落事件表）
+  rpc PushCustom(PushCustomRequest) returns (PushResponse);
+
+  // 查询用户当前在线连接（设备/平台/连接质量等，供业务选端或展示）
+  rpc GetUserConnections(GetUserConnectionsRequest) returns (GetUserConnectionsResponse);
+}
+
+// ----------------------------------------------------------------------------
+// 推送请求/响应（复用 common 类型）
+// ----------------------------------------------------------------------------
+
+message PushMessageRequest {
+  repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
+  repeated flare.common.v1.Message messages = 2; // 消息列表（至少一条）
+  PushOptions options = 3;                     // 可选，空则用默认（至少一次、全部设备）
+}
+
+message PushEventRequest {
+  repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
+  repeated flare.common.v1.Event events = 2;   // 事件列表；与 common/event Event 一致
+  PushOptions options = 3;
+}
+
+message PushNotificationRequest {
+  repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
+  flare.common.v1.NotificationMessage notification = 2; // 与 common/notification 一致
+  PushOptions options = 3;
+}
+
+message PushAckRequest {
+  repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
+  flare.common.v1.Ack ack = 2;                 // 送达：`payload.conversation`；批确认：`push`/`batch`；勿上行 `send`/`event`
+  PushOptions options = 3;                     // 可选，ACK 通常无需离线推送
+}
+
+message PushCustomRequest {
+  repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
+  flare.common.v1.CustomData custom_data = 2;  // 与 common/data CustomData 一致
+  PushOptions options = 3;
+}
+
+// 统一推送响应：status 必填，成功时 result 为汇总，多用户时可选 user_results 明细
+message PushResponse {
+  optional PushResult result = 2;             // 汇总结果（所有用户设备数合计）
+  repeated UserPushResult user_results = 3;    // 多用户推送时的按用户明细（可选）
+}
+
+// 通知推送响应（可扩展：如 notification_id、已写入离线队列等）
+message PushNotificationResponse {
+  optional PushResult result = 2;             // 汇总结果
+  repeated UserPushResult user_results = 3;   // 多用户时的按用户明细（可选）
+  optional string notification_id = 4;        // 与 NotificationMessage.notification_id 一致，便于去重
+}
+
+message PushAckResponse {
+  optional PushResult result = 2;             // 汇总结果
+  repeated UserPushResult user_results = 3;    // 多用户时的按用户明细（可选）
+}
+
+// ----------------------------------------------------------------------------
+// 连接查询（业务侧查询用户在线状态，便于选端、展示、限流）
+// ----------------------------------------------------------------------------
+
+message GetUserConnectionsRequest {
+  string user_id = 1;
+  repeated string platforms = 2;   // 过滤平台，空=全部
+  int32 limit = 3;                // 最多返回连接数，默认 50
+}
+
+message ConnectionInfo {
+  string device_id = 1;
+  string platform = 2;            // ios / android / web / pc
+  google.protobuf.Timestamp connected_at = 3;
+  optional string app_version = 4;
+  optional flare.common.v1.ConnectionQuality quality = 5; // 可选，见 common/metadata
+}
+
+message GetUserConnectionsResponse {
+  repeated ConnectionInfo connections = 2;
+  int32 total_online = 3;         // 该用户当前在线连接数
+}

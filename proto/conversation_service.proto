@@ -1,0 +1,426 @@
+syntax = "proto3";
+
+package flare.conversation.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "conversation.proto";
+import "errors.proto";
+import "metadata.proto";
+import "message.proto";
+import "sync.proto";
+import "enums.proto";
+
+// =============================================================================
+// Conversation 域（会话同步 / 管理 / 子话题）
+// =============================================================================
+//
+// 业务侧 gRPC，不直接使用 PayloadCommand；网关/SDK 与客户端以 PayloadCommand 封装，本域仅使用 common 类型。
+// 服务划分：ConversationReadService（只读原子能力）、ConversationManageService（写/游标/在线）、ThreadService（子话题）。
+// 类型对齐：common/sync、common/conversation。
+// 注意：跨会话/跨存储的同步编排统一由 `flare.sync.v1.SyncService`（flare-sync-orchestrator）完成；
+// 本域不提供「Sync*」聚合型 gRPC，仅暴露列表/Bootstrap/详情等基础读与命令写。
+//
+// ----------------------------------------------------------------------------
+// 服务定义
+// ----------------------------------------------------------------------------
+
+/// ConversationReadService：会话域**只读**原子接口（Bootstrap / 列表 / 详情）。
+/// 消息按 seq 增量、会话补丁编排等请走 `flare.sync.v1.SyncService`。
+service ConversationReadService {
+  rpc ConversationBootstrap(ConversationBootstrapRequest) returns (ConversationBootstrapResponse);
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  rpc GetConversationDetail(GetConversationDetailRequest) returns (GetConversationDetailResponse);
+  rpc GetConversationMembers(GetConversationMembersRequest) returns (GetConversationMembersResponse);  // 获取会话成员ID列表
+}
+
+/// ConversationManageService：会话写模型与侧效应（创建/更新/删除、参与者、游标、已读、在线、搜索等）
+service ConversationManageService {
+  rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);  // 创建会话
+  rpc UpdateConversation(UpdateConversationRequest) returns (UpdateConversationResponse);  // 更新会话
+  rpc DeleteConversation(DeleteConversationRequest) returns (google.protobuf.Empty);  // 删除会话
+  rpc ManageParticipants(ManageParticipantsRequest) returns (ManageParticipantsResponse);  // 管理参与者
+  rpc BatchAcknowledge(BatchAcknowledgeRequest) returns (google.protobuf.Empty);  // 批量已读
+  rpc SearchConversations(SearchConversationsRequest) returns (SearchConversationsResponse);  // 搜索会话
+  rpc UpdateCursor(UpdateCursorRequest) returns (google.protobuf.Empty);  // 更新已读/同步游标
+  rpc MarkConversationAsRead(MarkConversationAsReadRequest) returns (google.protobuf.Empty);  // 标记已读
+  rpc UpdatePresence(UpdatePresenceRequest) returns (google.protobuf.Empty);  // 更新在线状态
+  rpc ForceConversationSync(ForceConversationSyncRequest) returns (google.protobuf.Empty);  // 强制刷新（内部命令）
+}
+
+/// ThreadService：子话题（以某条消息为根的话题，创建/列表/获取/更新/删除）
+service ThreadService {
+  rpc CreateThread(CreateThreadRequest) returns (CreateThreadResponse);  // 创建子话题
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);  // 子话题列表
+  rpc GetThread(GetThreadRequest) returns (GetThreadResponse);  // 获取子话题
+  rpc UpdateThread(UpdateThreadRequest) returns (UpdateThreadResponse);  // 更新子话题
+  rpc DeleteThread(DeleteThreadRequest) returns (DeleteThreadResponse);  // 删除子话题
+}
+
+// ----------------------------------------------------------------------------
+// 枚举与公共模型
+// ----------------------------------------------------------------------------
+
+/// 排序方式（列表/搜索用）
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_UPDATED_DESC = 1;  // 更新时间倒序
+  SORT_ORDER_UPDATED_ASC = 2;  // 更新时间正序
+  SORT_ORDER_UNREAD_DESC = 3;  // 未读数倒序
+}
+
+// --- 会话列表/全量/详情 消息体（供 DATA 信道 `flare.sync.v1.Sync`、客户端序列化等复用；不再挂在本域 gRPC service 上）---
+
+/// 同步会话（增量）请求：游标 + 条数
+message SyncConversationsRequest {
+  google.protobuf.Timestamp client_conversation_cursor = 1;  // 客户端会话游标
+  int32 limit = 2;  // 本批条数
+}
+
+/// 同步会话（增量）响应：patches + 服务端游标
+message SyncConversationsResponse {
+  repeated flare.common.v1.ConversationPatch patches = 1;
+  google.protobuf.Timestamp server_conversation_cursor = 2;
+  bool has_more = 3;
+}
+
+/// 全量会话请求：选项（含归档/删除、批次大小等）
+message ConversationSyncAllRequest {
+  flare.common.v1.ConversationSyncAllOptions sync_options = 1;
+}
+
+/// 全量会话响应：会话列表 + 游标 + 元数据
+message ConversationSyncAllResponse {
+  repeated flare.common.v1.ConversationSummary conversations = 1;
+  google.protobuf.Timestamp server_conversation_cursor = 2;
+  uint64 server_max_seq = 3;
+  map<string, string> metadata = 4;
+}
+
+/// 会话详情请求：按 conversation_id 拉取
+message GetConversationDetailRequest {
+  string conversation_id = 1;  // 会话 ID
+}
+
+/// 会话详情响应：ConversationDetail（common）+ 元数据
+message GetConversationDetailResponse {
+  flare.common.v1.ConversationDetail detail = 1;
+  map<string, string> metadata = 2;
+}
+
+/// 获取会话成员请求
+message GetConversationMembersRequest {
+  string conversation_id = 1;  // 会话 ID
+}
+
+/// 获取会话成员响应
+message GetConversationMembersResponse {
+  repeated string member_ids = 1;  // 成员用户ID列表
+}
+
+// --- 会话写模型与公共结构（创建/更新返回、参与者、策略、设备、游标）---
+
+/// 会话完整模型（写侧：创建/更新返回；读侧详情见 common.ConversationDetail）
+message Conversation {
+  string conversation_id = 1;  // 会话 ID
+  flare.common.v1.ConversationType conversation_type = 2;  // 会话类型
+  string business_type = 3;  // 业务类型
+  map<string, string> attributes = 4;  // 扩展
+  repeated flare.common.v1.ConversationParticipant participants = 5;  // 参与者
+  flare.common.v1.ConversationVisibility visibility = 6;  // 可见性
+  flare.common.v1.ConversationLifecycleState lifecycle_state = 7;  // 生命周期
+  google.protobuf.Timestamp created_at = 8;  // 创建时间
+  google.protobuf.Timestamp updated_at = 9;  // 更新时间
+  flare.common.v1.ConversationPolicy policy = 10;  // 策略
+  /// 与库 conversations.channel_id 一致：单聊恒空；非单聊为消息 channel_id
+  string channel_id = 11;
+}
+
+/// 会话参与者（本域请求/响应用；与 common.ConversationParticipant 字段兼容）
+message ConversationParticipant {
+  string user_id = 1;  // 用户 ID
+  repeated string roles = 2;  // 角色列表
+  bool muted = 3;  // 是否免打扰
+  bool pinned = 4;  // 是否置顶
+  map<string, string> attributes = 5;  // 扩展
+}
+
+/// 会话策略（冲突解决、设备数、匿名、历史同步等）
+message ConversationPolicy {
+  flare.common.v1.ConflictResolution conflict_resolution = 1;  // 冲突解决
+  int32 max_devices = 2;  // 最大设备数
+  bool allow_anonymous = 3;  // 是否允许匿名
+  bool allow_history_sync = 4;  // 是否允许历史同步
+  map<string, string> metadata = 5;  // 扩展
+}
+
+/// 设备在线状态（多端）
+message DevicePresence {
+  string device_id = 1;  // 设备 ID
+  string device_platform = 2;  // 平台
+  flare.common.v1.DeviceState state = 3;  // 状态
+  google.protobuf.Timestamp last_seen_at = 4;  // 最后可见时间
+}
+
+/// 已读游标（单会话维度，用于批量已读）
+message AckCursor {
+  string conversation_id = 1;  // 会话 ID
+  int64 message_ts = 2;  // 已读到的消息时间戳
+}
+
+/// 参与者角色变更（管理参与者时用）
+message ParticipantRoleUpdate {
+  string user_id = 1;  // 用户 ID
+  repeated string roles = 2;  // 新角色列表
+}
+
+// ----------------------------------------------------------------------------
+// ConversationSyncService：同步/读模型 请求与响应
+// ----------------------------------------------------------------------------
+
+/// 会话引导请求（冷启动：拉会话 + 可选最近消息）
+/// user_id 仅由认证上下文注入，勿在报文体重复传递。
+message ConversationBootstrapRequest {
+  reserved 1;
+  reserved "user_id";
+  map<string, int64> client_cursor_map = 2;  // 各会话客户端游标
+  bool include_recent_messages = 3;  // 是否带最近消息
+  int32 recent_message_limit = 4;  // 最近消息条数
+  string device_id = 5;  // 设备 ID
+  string device_platform = 6;  // 平台
+}
+
+/// 会话引导响应：摘要列表、最近消息、设备在线、游标、策略
+message ConversationBootstrapResponse {
+  repeated flare.common.v1.ConversationSummary conversations = 1;  // 会话摘要列表
+  repeated flare.common.v1.Message recent_messages = 2;  // 最近消息
+  repeated DevicePresence devices = 3;  // 设备在线
+  map<string, int64> server_cursor_map = 4;  // 服务端游标
+  ConversationPolicy policy = 5;  // 策略
+}
+
+/// 拉取会话列表请求（分页 + 排序）
+message ListConversationsRequest {
+  reserved 1;
+  reserved "user_id";
+  string cursor = 2;  // 分页游标
+  int32 limit = 3;  // 每页条数
+  SortOrder order = 4;  // 排序
+}
+
+/// 拉取会话列表响应
+message ListConversationsResponse {
+  repeated flare.common.v1.ConversationSummary conversations = 1;  // 会话列表
+  string next_cursor = 2;  // 下一页游标
+  bool has_more = 3;  // 是否还有更多
+}
+
+/// 同步消息请求（按会话 + 时间/游标）
+message SyncMessagesRequest {
+  reserved 1;
+  reserved "user_id";
+  string conversation_id = 2;  // 会话 ID
+  int64 since_ts = 3;  // 起始时间戳
+  string cursor = 4;  // 游标
+  int32 limit = 5;  // 条数
+  bool include_ack = 6;  // 是否包含 ACK
+}
+
+/// 同步消息响应
+message SyncMessagesResponse {
+  repeated flare.common.v1.Message messages = 1;  // 消息列表
+  string next_cursor = 2;  // 下一页游标
+  int64 server_cursor_ts = 3;  // 服务端游标时间戳
+}
+
+/// 更新游标请求（已读位置）
+message UpdateCursorRequest {
+  reserved 1;
+  reserved "user_id";
+  string conversation_id = 2;  // 会话 ID
+  int64 message_ts = 3;  // 已读到的消息时间戳
+  string device_id = 5;  // 设备 ID
+}
+
+/// 标记会话已读请求（read_seq=0 时由服务端取 last_message_seq）
+message MarkConversationAsReadRequest {
+  string conversation_id = 1;  // 会话 ID
+  int64 read_seq = 2;  // 已读序号
+}
+
+/// 更新在线状态请求（多端冲突策略、通知）
+message UpdatePresenceRequest {
+  string user_id = 1;  // 用户 ID
+  string device_id = 2;  // 设备 ID
+  string device_platform = 3;  // 平台
+  flare.common.v1.DeviceState state = 4;  // 状态
+  flare.common.v1.ConflictResolution resolution = 6;  // 冲突解决
+  bool notify_conflict = 7;  // 是否通知冲突
+  string conflict_reason = 8;  // 冲突原因
+}
+
+/// 强制会话同步请求（指定会话 ID 列表 + 原因）
+message ForceConversationSyncRequest {
+  string user_id = 3;  // 用户 ID
+  repeated string conversation_ids = 4;  // 会话 ID 列表
+  string reason = 5;  // 原因
+}
+
+// ----------------------------------------------------------------------------
+// ConversationManageService：管理/写模型 请求与响应
+// ----------------------------------------------------------------------------
+
+/// 创建会话请求
+message CreateConversationRequest {
+  flare.common.v1.ConversationType conversation_type = 3;  // 会话类型
+  string business_type = 4;  // 业务类型
+  repeated ConversationParticipant participants = 5;  // 初始参与者
+  map<string, string> attributes = 6;  // 扩展
+  flare.common.v1.ConversationVisibility visibility = 7;  // 可见性
+  /// 落库 conversations.channel_id：单聊须空；群/频道等填消息 channel_id
+  string channel_id = 8;
+}
+
+/// 创建会话响应
+message CreateConversationResponse {
+  Conversation conversation = 1;  // 新会话
+}
+
+/// 更新会话请求（展示名、属性、可见性、生命周期）
+message UpdateConversationRequest {
+  string conversation_id = 3;  // 会话 ID
+  string display_name = 4;  // 展示名
+  map<string, string> attributes = 5;  // 扩展
+  flare.common.v1.ConversationVisibility visibility = 6;  // 可见性
+  flare.common.v1.ConversationLifecycleState lifecycle_state = 7;  // 生命周期
+}
+
+/// 更新会话响应
+message UpdateConversationResponse {
+  Conversation conversation = 1;  // 更新后会话
+}
+
+/// 删除会话请求（可选硬删）
+message DeleteConversationRequest {
+  string conversation_id = 3;  // 会话 ID
+  bool hard_delete = 4;  // 是否硬删
+}
+
+/// 管理参与者请求（添加/移除/角色变更）
+message ManageParticipantsRequest {
+  string conversation_id = 3;  // 会话 ID
+  repeated ConversationParticipant to_add = 4;  // 待添加
+  repeated string to_remove = 5;  // 待移除用户 ID
+  repeated ParticipantRoleUpdate role_updates = 6;  // 角色变更
+}
+
+/// 管理参与者响应
+message ManageParticipantsResponse {
+  repeated ConversationParticipant participants = 1;  // 当前参与者
+}
+
+/// 批量确认已读请求（多会话游标）
+message BatchAcknowledgeRequest {
+  string user_id = 3;  // 用户 ID
+  repeated AckCursor cursors = 4;  // 各会话游标
+}
+
+/// 搜索会话请求（过滤 + 排序 + 分页）
+message SearchConversationsRequest {
+  repeated flare.common.v1.FilterExpression filters = 3;  // 过滤条件
+  repeated flare.common.v1.SortExpression sort = 4;  // 排序
+  flare.common.v1.Pagination pagination = 5;  // 分页
+}
+
+/// 搜索会话响应
+message SearchConversationsResponse {
+  repeated flare.common.v1.ConversationSummary conversations = 1;  // 会话列表
+  flare.common.v1.Pagination pagination = 2;  // 分页信息
+}
+
+// ----------------------------------------------------------------------------
+// ThreadService：子话题 请求与响应
+// ----------------------------------------------------------------------------
+// 子话题：以某条消息为根的话题（Discord/Telegram 风格），支持置顶、锁定、归档。
+
+/// 子话题模型（以 root_message_id 为根）
+message Thread {
+  string id = 1;  // 话题 ID，通常等于 root_message_id
+  string conversation_id = 2;  // 所属会话 ID
+  string root_message_id = 3;  // 根消息 ID
+  string title = 4;  // 标题
+  string creator_id = 5;  // 创建者 ID
+  int32 reply_count = 6;  // 回复数
+  google.protobuf.Timestamp last_reply_at = 7;  // 最后回复时间
+  string last_reply_id = 8;  // 最后回复消息 ID
+  string last_reply_user_id = 9;  // 最后回复用户 ID
+  int32 participant_count = 10;  // 参与人数
+  bool is_pinned = 11;  // 是否置顶
+  bool is_locked = 12;  // 是否锁定
+  bool is_archived = 13;  // 是否归档
+  google.protobuf.Timestamp created_at = 14;  // 创建时间
+  google.protobuf.Timestamp updated_at = 15;  // 更新时间
+  map<string, string> extra = 16;  // 扩展
+}
+
+/// 创建子话题请求
+message CreateThreadRequest {
+  string conversation_id = 1;  // 会话 ID
+  string root_message_id = 2;  // 根消息 ID
+  string title = 3;  // 标题
+}
+
+/// 创建子话题响应
+message CreateThreadResponse {
+  Thread thread = 1;  // 新话题
+}
+
+/// 拉取子话题列表请求（分页、含归档、排序）
+message ListThreadsRequest {
+  string conversation_id = 1;  // 会话 ID
+  int32 limit = 2;  // 每页条数，默认 50
+  int32 offset = 3;  // 偏移
+  bool include_archived = 4;  // 是否含归档
+  SortOrder sort_order = 5;  // 排序，默认 UPDATED_DESC
+}
+
+/// 拉取子话题列表响应
+message ListThreadsResponse {
+  repeated Thread threads = 1;  // 话题列表
+  int32 total_count = 2;  // 总数
+  bool has_more = 3;  // 是否还有更多
+}
+
+/// 获取子话题请求
+message GetThreadRequest {
+  string thread_id = 1;  // 话题 ID
+}
+
+/// 获取子话题响应
+message GetThreadResponse {
+  Thread thread = 1;  // 话题
+}
+
+/// 更新子话题请求（标题、置顶、锁定、归档）
+message UpdateThreadRequest {
+  string thread_id = 1;  // 话题 ID
+  optional string title = 2;  // 标题
+  optional bool is_pinned = 3;  // 是否置顶
+  optional bool is_locked = 4;  // 是否锁定
+  optional bool is_archived = 5;  // 是否归档
+}
+
+/// 更新子话题响应
+message UpdateThreadResponse {
+  Thread thread = 1;  // 更新后话题
+}
+
+/// 删除子话题请求
+message DeleteThreadRequest {
+  string thread_id = 1;  // 话题 ID
+}
+
+/// 删除子话题响应
+message DeleteThreadResponse {
+  bool success = 1;  // 是否成功
+}

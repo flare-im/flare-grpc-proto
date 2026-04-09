@@ -1,0 +1,630 @@
+syntax = "proto3";
+
+package flare.media.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "errors.proto";
+import "metadata.proto";
+
+// =============================================================================
+// MediaService（上传/分片/引用/访问/处理/ACL/桶）
+// =============================================================================
+// 业务侧 gRPC，不直接使用 PayloadCommand。复用 common：Pagination、FilterExpression、SortExpression。
+
+// ----------------------------------------------------------------------------
+// 服务
+// ----------------------------------------------------------------------------
+
+// MediaService：上传/分片/引用/访问/删除/图片视频处理/ACL/桶
+service MediaService {
+  rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse);  // 流式上传
+  rpc InitiateMultipartUpload(InitiateMultipartUploadRequest) returns (InitiateMultipartUploadResponse);  // 初始化分片
+  rpc UploadMultipartChunk(UploadMultipartChunkRequest) returns (UploadMultipartChunkResponse);  // 上传分片
+  rpc CompleteMultipartUpload(CompleteMultipartUploadRequest) returns (UploadFileResponse);  // 完成分片
+  rpc AbortMultipartUpload(AbortMultipartUploadRequest) returns (AbortMultipartUploadResponse);  // 中止分片
+  rpc InitiateDirectUpload(InitiateDirectUploadRequest) returns (InitiateDirectUploadResponse);  // 发起直传上传会话
+  rpc GetDirectUploadStatus(GetDirectUploadStatusRequest) returns (GetDirectUploadStatusResponse);  // 查询直传上传状态
+  rpc PresignDirectUploadParts(PresignDirectUploadPartsRequest) returns (PresignDirectUploadPartsResponse);  // 批量签发 part 上传 URL
+  rpc CommitDirectUploadParts(CommitDirectUploadPartsRequest) returns (CommitDirectUploadPartsResponse);  // 提交已上传 parts
+  rpc CompleteDirectUpload(CompleteDirectUploadRequest) returns (UploadFileResponse);  // 完成直传上传
+  rpc AbortDirectUpload(AbortDirectUploadRequest) returns (AbortMultipartUploadResponse);  // 中止直传上传
+  rpc CreateReference(CreateReferenceRequest) returns (CreateReferenceResponse);  // 创建引用
+  rpc DeleteReference(DeleteReferenceRequest) returns (DeleteReferenceResponse);  // 删除引用
+  rpc ListReferences(ListReferencesRequest) returns (ListReferencesResponse);  // 列出引用
+  rpc CleanupOrphanedAssets(CleanupOrphanedAssetsRequest) returns (CleanupOrphanedAssetsResponse);  // 清理孤儿资源
+  rpc GetFileUrl(GetFileUrlRequest) returns (GetFileUrlResponse);  // 获取 URL
+  rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);  // 获取文件信息
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileChunk);  // 下载文件内容
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);  // 删除文件
+  rpc ProcessImage(ProcessImageRequest) returns (ProcessImageResponse);  // 图片处理
+  rpc ProcessVideo(ProcessVideoRequest) returns (ProcessVideoResponse);  // 视频处理
+  rpc SetObjectAcl(SetObjectAclRequest) returns (google.protobuf.Empty);  // 设置 ACL
+  rpc ListObjects(ListObjectsRequest) returns (ListObjectsResponse);  // 列出对象
+  rpc GenerateUploadUrl(GenerateUploadUrlRequest) returns (GenerateUploadUrlResponse);  // 生成上传 URL
+  rpc DescribeBucket(DescribeBucketRequest) returns (DescribeBucketResponse);  // 描述桶
+}
+
+// ----------------------------------------------------------------------------
+// 枚举与公共模型
+// ----------------------------------------------------------------------------
+
+// 文件类型
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  FILE_TYPE_IMAGE = 1;  // 图片
+  FILE_TYPE_VIDEO = 2;  // 视频
+  FILE_TYPE_AUDIO = 3;  // 音频
+  FILE_TYPE_DOCUMENT = 4;  // 文档
+  FILE_TYPE_OTHER = 5;  // 其他
+}
+
+// 水印位置
+enum WatermarkPosition {
+  WATERMARK_POSITION_UNSPECIFIED = 0;
+  WATERMARK_POSITION_TOP_LEFT = 1;  // 左上
+  WATERMARK_POSITION_TOP_RIGHT = 2;  // 右上
+  WATERMARK_POSITION_BOTTOM_LEFT = 3;  // 左下
+  WATERMARK_POSITION_BOTTOM_RIGHT = 4;  // 右下
+  WATERMARK_POSITION_CENTER = 5;  // 居中
+}
+
+// 直传模式
+enum DirectUploadTransportKind {
+  DIRECT_UPLOAD_TRANSPORT_KIND_UNSPECIFIED = 0;
+  DIRECT_UPLOAD_TRANSPORT_KIND_SINGLE_PUT = 1;
+  DIRECT_UPLOAD_TRANSPORT_KIND_MULTIPART_PUT = 2;
+}
+
+// 文件信息
+message FileInfo {
+  string file_id = 1;  // 文件 ID
+  string file_name = 2;  // 文件名
+  string mime_type = 3;  // MIME 类型
+  int64 size = 4;  // 大小（字节）
+  string url = 5;  // 访问 URL
+  string cdn_url = 6;  // CDN URL
+  google.protobuf.Timestamp created_at = 7;  // 创建时间
+  map<string, string> metadata = 8;  // 扩展
+  uint64 reference_count = 10;  // 引用数
+  string status = 11;  // 状态
+  string sha256 = 12;  // SHA256
+  string md5 = 13;  // MD5
+  google.protobuf.Timestamp grace_expires_at = 14;  // 宽限期过期时间
+  string bucket = 15;  // 桶名
+  string object_key = 16;  // 对象键
+  string tenant = 17;  // 租户
+}
+
+// 媒体引用信息
+message MediaReferenceInfo {
+  string reference_id = 1;  // 引用 ID
+  string file_id = 2;  // 文件 ID
+  string namespace = 3;  // 命名空间
+  string owner_id = 4;  // 所有者 ID
+  string business_tag = 5;  // 业务标签
+  map<string, string> metadata = 6;  // 扩展
+  google.protobuf.Timestamp created_at = 7;  // 创建时间
+  google.protobuf.Timestamp expires_at = 8;  // 过期时间
+}
+
+// 访问控制条目
+message AccessControlEntry {
+  string principal = 1;  // 主体（user/role/tenant）
+  repeated string permissions = 2;  // 权限（read/write/delete/manage）
+}
+
+// ----------------------------------------------------------------------------
+// 上传与分片
+// ----------------------------------------------------------------------------
+
+// 上传文件请求（流式：先 metadata 后 chunk_data）
+message UploadFileRequest {
+  oneof request {
+    UploadFileMetadata metadata = 1;  // 元数据
+    bytes chunk_data = 2;  // 分片数据
+  }
+}
+
+// 上传文件元数据
+message UploadFileMetadata {
+  string file_name = 1;  // 文件名
+  string mime_type = 2;  // MIME 类型
+  int64 file_size = 3;  // 文件大小
+  FileType file_type = 4;  // 文件类型
+  string upload_id = 5;  // 上传 ID（客户端生成）
+  map<string, string> metadata = 8;  // 扩展
+  string user_id = 9;  // 用户 ID
+  string trace_id = 10;  // 追踪 ID
+  string namespace = 11;  // 命名空间
+  string business_tag = 12;  // 业务标签
+  string bucket = 13;  // 桶名
+  string object_key = 14;  // 对象键
+  map<string, string> labels = 15;  // 标签
+}
+
+// 上传文件响应
+message UploadFileResponse {
+  string file_id = 1;  // 文件 ID
+  string url = 2;  // 访问 URL
+  string cdn_url = 3;  // CDN URL
+  FileInfo info = 4;  // 文件信息
+  bool success = 5;  // 是否成功
+  string error_message = 6;  // 错误信息
+}
+
+// 初始化分片上传请求
+message InitiateMultipartUploadRequest {
+  UploadFileMetadata metadata = 1;  // 元数据
+  int64 desired_chunk_size = 2;  // 期望分片大小
+}
+
+// 初始化分片上传响应
+message InitiateMultipartUploadResponse {
+  string upload_id = 1;  // 上传 ID
+  int64 chunk_size = 2;  // 分片大小
+  google.protobuf.Timestamp expires_at = 3;  // 过期时间
+  bool success = 4;  // 是否成功
+  string error_message = 5;  // 错误信息
+}
+
+// 上传分片请求
+message UploadMultipartChunkRequest {
+  string upload_id = 1;  // 上传 ID
+  uint32 chunk_index = 2;  // 分片序号
+  bytes payload = 3;  // 分片数据
+}
+
+// 上传分片响应
+message UploadMultipartChunkResponse {
+  string upload_id = 1;  // 上传 ID
+  uint32 chunk_index = 2;  // 分片序号
+  uint64 uploaded_size = 3;  // 已上传大小
+  google.protobuf.Timestamp expires_at = 4;  // 过期时间
+  bool success = 5;  // 是否成功
+  string error_message = 6;  // 错误信息
+}
+
+// 完成分片上传请求
+message CompleteMultipartUploadRequest {
+  string upload_id = 1;  // 上传 ID
+}
+
+// 中止分片上传请求
+message AbortMultipartUploadRequest {
+  string upload_id = 1;  // 上传 ID
+}
+
+// 中止分片上传响应
+message AbortMultipartUploadResponse {
+  bool success = 1;  // 是否成功
+  string error_message = 2;  // 错误信息
+}
+
+// 发起直传上传请求
+message InitiateDirectUploadRequest {
+  UploadFileMetadata metadata = 1;
+  int64 desired_part_size = 2;
+  string file_fingerprint = 3;
+  string head_tail_sha256 = 4;
+  string full_sha256 = 5;
+}
+
+// 发起直传上传响应
+message InitiateDirectUploadResponse {
+  string upload_id = 1;
+  string file_id = 2;
+  DirectUploadTransportKind transport_kind = 3;
+  string bucket = 4;
+  string object_key = 5;
+  string storage_upload_id = 6;
+  int64 part_size = 7;
+  uint32 total_parts = 8;
+  string upload_url = 9;
+  google.protobuf.Timestamp expires_at = 10;
+  bool success = 11;
+  string error_message = 12;
+}
+
+// 查询直传上传状态请求
+message GetDirectUploadStatusRequest {
+  string upload_id = 1;
+}
+
+// 已上传 part 信息
+message UploadedPartInfo {
+  uint32 part_number = 1;
+  string etag = 2;
+  int64 size = 3;
+  string sha256 = 4;
+}
+
+// 查询直传上传状态响应
+message GetDirectUploadStatusResponse {
+  string upload_id = 1;
+  string file_id = 2;
+  DirectUploadTransportKind transport_kind = 3;
+  string bucket = 4;
+  string object_key = 5;
+  string storage_upload_id = 6;
+  int64 part_size = 7;
+  int64 total_size = 8;
+  uint32 total_parts = 9;
+  repeated UploadedPartInfo uploaded_parts = 10;
+  google.protobuf.Timestamp expires_at = 11;
+  bool success = 12;
+  string error_message = 13;
+}
+
+// 批量签发 part 上传 URL 请求
+message PresignDirectUploadPartsRequest {
+  string upload_id = 1;
+  repeated uint32 part_numbers = 2;
+  int32 expires_in = 3;
+}
+
+// 单个 part 的预签名上传地址
+message PresignedUploadPart {
+  uint32 part_number = 1;
+  string upload_url = 2;
+  map<string, string> headers = 3;
+}
+
+// 批量签发 part 上传 URL 响应
+message PresignDirectUploadPartsResponse {
+  repeated PresignedUploadPart parts = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+// 提交已上传 parts 请求
+message CommitDirectUploadPartsRequest {
+  string upload_id = 1;
+  repeated UploadedPartInfo parts = 2;
+}
+
+// 提交已上传 parts 响应
+message CommitDirectUploadPartsResponse {
+  repeated uint32 committed_parts = 1;
+  int64 uploaded_size = 2;
+  bool success = 3;
+  string error_message = 4;
+}
+
+// 完成直传上传请求
+message CompleteDirectUploadRequest {
+  string upload_id = 1;
+}
+
+// 中止直传上传请求
+message AbortDirectUploadRequest {
+  string upload_id = 1;
+}
+
+// ----------------------------------------------------------------------------
+// 引用
+// ----------------------------------------------------------------------------
+
+// 创建引用请求
+message CreateReferenceRequest {
+  string file_id = 1;  // 文件 ID
+  string namespace = 2;  // 命名空间
+  string owner_id = 3;  // 所有者 ID
+  string business_tag = 4;  // 业务标签
+  map<string, string> metadata = 5;  // 扩展
+  string display_name = 8;  // 展示名
+  string description = 9;  // 描述
+}
+
+// 创建引用响应
+message CreateReferenceResponse {
+  FileInfo info = 1;  // 文件信息
+  bool success = 2;  // 是否成功
+  string error_message = 3;  // 错误信息
+}
+
+// 删除引用请求
+message DeleteReferenceRequest {
+  string file_id = 1;  // 文件 ID
+  string reference_id = 2;  // 引用 ID
+}
+
+// 删除引用响应
+message DeleteReferenceResponse {
+  FileInfo info = 1;  // 文件信息
+  bool success = 2;  // 是否成功
+  string error_message = 3;  // 错误信息
+}
+
+// 列出引用请求
+message ListReferencesRequest {
+  string file_id = 1;  // 文件 ID
+  flare.common.v1.Pagination pagination = 2;  // 分页
+  repeated flare.common.v1.FilterExpression filters = 5;  // 过滤
+  repeated flare.common.v1.SortExpression sort = 6;  // 排序
+}
+
+// 列出引用响应
+message ListReferencesResponse {
+  repeated MediaReferenceInfo references = 1;  // 引用列表
+  flare.common.v1.Pagination pagination = 2;
+  bool success = 3;  // 是否成功
+  string error_message = 4;  // 错误信息
+}
+
+// 清理孤儿资源请求
+message CleanupOrphanedAssetsRequest {
+  uint32 limit = 1;  // 最多处理条数
+  bool dry_run = 4;  // 是否仅模拟
+}
+
+// 清理孤儿资源响应
+message CleanupOrphanedAssetsResponse {
+  repeated string file_ids = 1;  // 已清理文件 ID 列表
+  bool success = 2;  // 是否成功
+  string error_message = 3;  // 错误信息
+  uint32 scanned = 5;  // 扫描数
+}
+
+// ----------------------------------------------------------------------------
+// 访问与删除
+// ----------------------------------------------------------------------------
+
+// 获取文件 URL 请求
+message GetFileUrlRequest {
+  string file_id = 1;  // 文件 ID
+  int32 expires_in = 2;  // 有效期秒数，默认 3600
+  bool download = 5;  // 是否下载
+  map<string, string> response_headers = 6;  // 响应头
+}
+
+// 获取文件 URL 响应
+message GetFileUrlResponse {
+  string url = 1;  // 访问 URL
+  string cdn_url = 2;  // CDN URL
+  google.protobuf.Timestamp expires_at = 3;  // 过期时间
+  bool success = 4;  // 是否成功
+  string error_message = 5;  // 错误信息
+}
+
+// 获取文件信息请求
+message GetFileInfoRequest {
+  string file_id = 1;  // 文件 ID
+}
+
+// 获取文件信息响应
+message GetFileInfoResponse {
+  FileInfo info = 1;  // 文件信息
+  bool success = 2;  // 是否成功
+  string error_message = 3;  // 错误信息
+}
+
+// 下载文件请求
+message DownloadFileRequest {
+  string file_id = 1;  // 文件 ID
+}
+
+// 下载文件分片
+message DownloadFileChunk {
+  bytes chunk_data = 1;  // 文件内容分片
+}
+
+// 删除文件请求
+message DeleteFileRequest {
+  string file_id = 1;
+  bool hard_delete = 4;
+}
+
+// 删除文件响应
+message DeleteFileResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// ----------------------------------------------------------------------------
+// 图片/视频处理与 ACL/桶
+// ----------------------------------------------------------------------------
+
+// 图片处理请求
+message ProcessImageRequest {
+  string file_id = 1;  // 文件 ID
+  repeated ImageOperation operations = 2;  // 操作列表
+  string target_bucket = 5;  // 目标桶
+  string output_prefix = 6;  // 输出前缀
+}
+
+// 图片操作（一种）
+message ImageOperation {
+  oneof operation {
+    ResizeOperation resize = 1;  // 缩放
+    CompressOperation compress = 2;  // 压缩
+    ThumbnailOperation thumbnail = 3;  // 缩略图
+    WatermarkOperation watermark = 4;  // 水印
+  }
+}
+
+// 缩放
+message ResizeOperation {
+  int32 width = 1;  // 宽
+  int32 height = 2;  // 高
+  bool keep_aspect_ratio = 3;  // 保持比例
+}
+
+// 压缩
+message CompressOperation {
+  int32 quality = 1;  // 质量 1–100
+}
+
+// 缩略图
+message ThumbnailOperation {
+  int32 size = 1;  // 最大边长
+}
+
+// 水印
+message WatermarkOperation {
+  string text = 1;  // 文本
+  WatermarkPosition position = 2;  // 位置
+}
+
+// 图片处理响应
+message ProcessImageResponse {
+  string processed_file_id = 1;  // 处理后文件 ID
+  string url = 2;  // 访问 URL
+  string cdn_url = 3;  // CDN URL
+  bool success = 4;  // 是否成功
+  string error_message = 5;  // 错误信息
+}
+
+// 视频处理请求
+message ProcessVideoRequest {
+  string file_id = 1;  // 文件 ID
+  repeated VideoOperation operations = 2;  // 操作列表
+  string target_bucket = 5;  // 目标桶
+  string output_prefix = 6;  // 输出前缀
+}
+
+// 视频操作（一种）
+message VideoOperation {
+  oneof operation {
+    TranscodeOperation transcode = 1;  // 转码
+    ExtractThumbnailOperation extract_thumbnail = 2;  // 截缩略图
+    CompressVideoOperation compress = 3;  // 压缩
+    SubtitleBurnOperation subtitle_burn = 4;  // 烧录字幕
+  }
+}
+
+// 转码
+message TranscodeOperation {
+  string format = 1;  // 格式（mp4/webm 等）
+  string quality = 2;  // 质量（high/medium/low）
+  int32 target_bitrate_kbps = 3;  // 目标码率（kbps）
+  int32 max_width = 4;  // 最大宽度
+}
+
+// 截缩略图
+message ExtractThumbnailOperation {
+  double time = 1;  // 时间点（秒）
+}
+
+// 视频压缩
+message CompressVideoOperation {
+  int32 bitrate = 1;  // 码率
+  string preset = 2;  // 预设
+}
+
+// 烧录字幕
+message SubtitleBurnOperation {
+  string subtitle_file_id = 1;  // 字幕文件 ID
+  string language = 2;  // 语言
+}
+
+// 视频处理响应
+message ProcessVideoResponse {
+  string processed_file_id = 1;  // 处理后文件 ID
+  string url = 2;  // 访问 URL
+  string cdn_url = 3;  // CDN URL
+  bool success = 4;  // 是否成功
+  string error_message = 5;  // 错误信息
+}
+
+// 设置对象 ACL 请求
+message SetObjectAclRequest {
+  string file_id = 1;  // 文件 ID
+  repeated AccessControlEntry entries = 4;  // ACL 条目
+}
+
+// 列出对象请求
+message ListObjectsRequest {
+  string bucket = 3;  // 桶名
+  string prefix = 4;  // 前缀
+  flare.common.v1.Pagination pagination = 5;  // 分页
+  repeated flare.common.v1.FilterExpression filters = 6;  // 过滤
+  repeated flare.common.v1.SortExpression sort = 7;  // 排序
+}
+
+// 列出对象响应
+message ListObjectsResponse {
+  repeated FileInfo files = 1;  // 文件列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 生成上传 URL 请求
+message GenerateUploadUrlRequest {
+  string bucket = 3;  // 桶名
+  string object_key = 4;  // 对象键
+  string mime_type = 5;  // MIME 类型
+  int64 expected_size = 6;  // 期望大小
+  int32 expires_in = 7;  // 有效期秒数
+}
+
+// 生成上传 URL 响应
+message GenerateUploadUrlResponse {
+  string upload_url = 1;  // 上传 URL
+  string object_key = 2;  // 对象键
+}
+
+// 描述桶请求
+message DescribeBucketRequest {
+  string bucket = 3;  // 桶名
+}
+
+// 描述桶响应
+message DescribeBucketResponse {
+  string bucket = 1;  // 桶名
+  string region = 2;  // 区域
+  string storage_class = 3;  // 存储类型
+  bool versioning_enabled = 4;  // 是否开启版本
+  map<string, string> metadata = 5;  // 扩展
+}
+
+// ----------------------------------------------------------------------------
+// SDK 文件媒体消息辅助模型（用于消息内容渲染与二次上传编排）
+// ----------------------------------------------------------------------------
+
+// 媒体尺寸信息
+message MediaDimensions {
+  int32 width = 1;
+  int32 height = 2;
+}
+
+// SDK 媒体消息类型（用于客户端快速分派渲染组件）
+enum SdkMediaKind {
+  SDK_MEDIA_KIND_UNSPECIFIED = 0;
+  SDK_MEDIA_KIND_IMAGE = 1;
+  SDK_MEDIA_KIND_VIDEO = 2;
+  SDK_MEDIA_KIND_AUDIO = 3;
+  SDK_MEDIA_KIND_FILE = 4;
+}
+
+// SDK 侧可直接消费的媒体消息素材
+message SdkMediaAttachment {
+  string file_id = 1;  // 文件 ID
+  SdkMediaKind kind = 2;  // 媒体类型
+  string file_name = 3;  // 文件名
+  string mime_type = 4;  // MIME 类型
+  int64 size = 5;  // 文件大小（字节）
+  string url = 6;  // 原始访问 URL（可为空）
+  string cdn_url = 7;  // CDN 访问 URL（可为空）
+  string thumb_file_id = 8;  // 缩略图文件 ID（图片/视频可用）
+  string thumb_url = 9;  // 缩略图 URL（可为空）
+  string thumb_cdn_url = 10;  // 缩略图 CDN URL（可为空）
+  MediaDimensions dimensions = 11;  // 媒体宽高（图片/视频可用）
+  uint32 duration_ms = 12;  // 时长（音视频可用，毫秒）
+  string checksum = 13;  // 内容校验（优先 SHA256）
+  map<string, string> metadata = 14;  // 扩展属性（codec、fps、waveform 等）
+}
+
+// 批量解析 SDK 媒体附件请求
+message ResolveSdkMediaAttachmentsRequest {
+  repeated string file_ids = 1;  // 需解析的文件 ID 列表
+  bool include_url = 2;  // 是否附带可访问 URL
+  int32 expires_in = 3;  // URL 有效期（秒）
+  string conversation_id = 4;  // 会话 ID（可用于 ACL 校验）
+}
+
+// 批量解析 SDK 媒体附件响应
+message ResolveSdkMediaAttachmentsResponse {
+  repeated SdkMediaAttachment attachments = 1;
+  bool success = 2;
+  string error_message = 3;
+}

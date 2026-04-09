@@ -1,0 +1,227 @@
+syntax = "proto3";
+
+package flare.signaling.router.v1;
+
+option go_package = "github.com/flare-labs/flare/proto/signaling/router/v1;routerv1";
+
+import "metadata.proto";
+import "errors.proto";
+import "event.proto";
+import "message.proto";
+import "ack.proto";
+import "data.proto";
+import "access_gateway.proto";
+
+// =============================================================================
+// Signaling Router（router.proto：上行 + 内部下行 Push）
+// =============================================================================
+// 上行：网关 / 客户端 → Route → Orchestrator / Push Proxy 等。
+// 下行（内部）：Push Worker 等 → Route（选端）→ AccessGateway 直推。
+
+// =============================================================================
+// RouterUpstreamService（上行路由服务）
+// =============================================================================
+// 处理客户端上行请求，按类型路由到不同的下游服务：
+// - RouteMessage：上行 MESSAGE → common.Message → 编排 SendMessage
+// - RouteEvent：上行 EVENT → common.Event → 编排 ExecuteEvent
+// - RouteAck：上行 ACK（Push / Conversation / Batch）→ Push Proxy / Kafka
+// - RouteData：上行 DATA（UserCustom 内层）→ common.CustomData
+
+// ----------------------------------------------------------------------------
+// 服务定义
+// ----------------------------------------------------------------------------
+
+// RouterUpstreamService：处理上行请求（Message、Event、Ack、Data）
+service RouterUpstreamService {
+  rpc RouteMessage(RouteMessageRequest) returns (RouteMessageResponse);  // 上行消息 → SendMessage
+  rpc RouteEvent(RouteEventRequest) returns (RouteEventResponse);  // 上行操作事件 → ExecuteEvent
+  rpc RouteAck(RouteAckRequest) returns (RouteAckResponse);  // 上行客户端 ACK → Push Proxy
+  rpc RouteData(RouteDataRequest) returns (RouteDataResponse);  // 上行 CustomData（DATA/user_custom）
+}
+
+// ----------------------------------------------------------------------------
+// 路由选项与策略
+// ----------------------------------------------------------------------------
+
+// 路由选项
+message RouteOptions {
+  int32 timeout_seconds = 1;  // 超时秒数，默认 5
+  bool enable_tracing = 2;  // 是否启用追踪，默认 true
+  RetryStrategy retry_strategy = 3;  // 重试策略，默认不重试
+  LoadBalanceStrategy load_balance_strategy = 4;  // 负载均衡策略
+  int32 priority = 5;  // 路由优先级，越大越高，默认 0
+}
+
+// 重试策略
+enum RetryStrategy {
+  RETRY_STRATEGY_UNSPECIFIED = 0;
+  RETRY_STRATEGY_NONE = 1;  // 不重试（默认）
+  RETRY_STRATEGY_ONCE = 2;  // 重试一次
+  RETRY_STRATEGY_EXPONENTIAL = 3;  // 指数退避最多 3 次
+}
+
+// 负载均衡策略
+enum LoadBalanceStrategy {
+  LOAD_BALANCE_STRATEGY_UNSPECIFIED = 0;
+  LOAD_BALANCE_STRATEGY_ROUND_ROBIN = 1;  // 轮询（默认）
+  LOAD_BALANCE_STRATEGY_LEAST_CONNECTIONS = 2;  // 最少连接
+  LOAD_BALANCE_STRATEGY_CONSISTENT_HASH = 3;  // 一致性哈希（会话同实例）
+}
+
+// ----------------------------------------------------------------------------
+// 消息路由
+// ----------------------------------------------------------------------------
+
+// 路由消息请求（仅 common.Message，与 PayloadCommand.MESSAGE 对应）
+message RouteMessageRequest {
+  string svid = 1;  // 业务系统标识，如 svid.im，默认 svid.im
+  flare.common.v1.Message message = 2;  // 上行消息体（必填）
+  RouteOptions options = 3;  // 路由选项
+}
+
+// 路由消息响应
+message RouteMessageResponse {
+  bytes response_data = 1;  // 业务响应（SendMessageResponse 编码），失败时为空
+  string routed_endpoint = 2;  // 实际路由到的端点（监控/调试）
+  RouteMetadata metadata = 3;  // 路由元数据
+}
+
+// ----------------------------------------------------------------------------
+// 事件路由
+// ----------------------------------------------------------------------------
+
+// 路由操作事件请求（撤回/编辑/标记等；Event 来自 common/event.proto）
+message RouteEventRequest {
+  string svid = 1;  // 业务系统标识，如 svid.im
+  flare.common.v1.Event event = 2;  // 领域事件
+  RouteOptions options = 3;  // 路由选项
+}
+
+// 路由操作事件响应（业务返回编码在 response_data，如 OperationResponse）
+message RouteEventResponse {
+  bytes response_data = 1;  // 业务响应编码
+  string routed_endpoint = 2;  // 实际路由端点
+  RouteMetadata metadata = 3;  // 路由元数据
+}
+
+// ----------------------------------------------------------------------------
+// ACK 路由
+// ----------------------------------------------------------------------------
+
+// 路由客户端 ACK 请求（PushAck / ConversationAck / AckBatch；勿上行 Send/Event）
+message RouteAckRequest {
+  string svid = 1;
+  flare.common.v1.Ack ack = 2;  // 必填
+  RouteOptions options = 3;
+}
+
+// 路由 ACK 响应
+message RouteAckResponse {
+  string routed_endpoint = 1;
+  RouteMetadata metadata = 2;
+}
+
+// ----------------------------------------------------------------------------
+// DATA 路由
+// ----------------------------------------------------------------------------
+
+// 路由 DATA 通道 UserCustom（common.CustomData）
+message RouteDataRequest {
+  string svid = 1;
+  flare.common.v1.CustomData data = 2;  // 必填
+  RouteOptions options = 3;
+}
+
+// 路由 DATA 响应
+message RouteDataResponse {
+  bytes response_data = 1;  // 可选：下游返回的 CustomData 等编码
+  string routed_endpoint = 2;
+  RouteMetadata metadata = 3;
+}
+
+// ----------------------------------------------------------------------------
+// 路由元数据
+// ----------------------------------------------------------------------------
+
+// 路由元数据（监控与调试）
+message RouteMetadata {
+  int64 route_duration_ms = 1;  // 路由总耗时（毫秒）
+  int64 business_duration_ms = 2;  // 业务处理耗时（毫秒）
+  int64 decision_duration_ms = 3;  // 路由决策耗时（毫秒）
+  bool from_cache = 4;  // 是否来自缓存
+  map<string, string> decision_details = 5;  // 决策详情（调试）
+}
+
+// ----------------------------------------------------------------------------
+// 设备路由目标（选端结果，供 Route 应用层与 DTO 使用）
+// ----------------------------------------------------------------------------
+
+message RouteTarget {
+  string user_id = 1;
+  string device_id = 2;
+  string device_platform = 3;
+  string gateway_id = 4;
+  string server_id = 5;
+  flare.common.v1.DevicePriority priority = 6;
+  double quality_score = 7;
+}
+
+// =============================================================================
+// RouterDownstreamService（Push Worker / 内部组件 → Route → AccessGateway）
+// =============================================================================
+// 仅直推：与 access_gateway.proto 中 PushMessage / PushEvent / PushNotification /
+// PushAck / PushCustom 一一对应；选端由 Route 按 PushStrategy 完成。
+
+service RouterDownstreamService {
+  rpc PushMessage(RouterDownstreamPushMessageRequest) returns (flare.access_gateway.v1.PushResponse);
+  rpc PushEvent(RouterDownstreamPushEventRequest) returns (flare.access_gateway.v1.PushResponse);
+  rpc PushNotification(RouterDownstreamPushNotificationRequest) returns (flare.access_gateway.v1.PushNotificationResponse);
+  rpc PushAck(RouterDownstreamPushAckRequest) returns (flare.access_gateway.v1.PushAckResponse);
+  rpc PushCustom(RouterDownstreamPushCustomRequest) returns (flare.access_gateway.v1.PushResponse);
+}
+
+// 推送选端策略（Route 在 user_id 的在线设备上应用）
+enum PushStrategy {
+  PUSH_STRATEGY_UNSPECIFIED = 0;
+  PUSH_STRATEGY_ALL_DEVICES = 1;
+  PUSH_STRATEGY_BEST_DEVICE = 2;
+  PUSH_STRATEGY_ACTIVE_DEVICES = 3;
+  PUSH_STRATEGY_PRIMARY_DEVICE = 4;
+}
+
+// user_id：与 PushTaskEnvelope.user_id 对齐，用于选端；push：AccessGateway 请求体（可含多 user_ids，由网关处理）
+// conversation_id：非空时 Route 在同会话下行上串行化（与 envelope.conversation_id 对齐）；通知/ACK/自定义可留空
+message RouterDownstreamPushMessageRequest {
+  string user_id = 1;
+  PushStrategy strategy = 2;
+  flare.access_gateway.v1.PushMessageRequest push = 3;
+  string conversation_id = 4;
+}
+
+message RouterDownstreamPushEventRequest {
+  string user_id = 1;
+  PushStrategy strategy = 2;
+  flare.access_gateway.v1.PushEventRequest push = 3;
+  string conversation_id = 4;
+}
+
+message RouterDownstreamPushNotificationRequest {
+  string user_id = 1;
+  PushStrategy strategy = 2;
+  flare.access_gateway.v1.PushNotificationRequest push = 3;
+  string conversation_id = 4;
+}
+
+message RouterDownstreamPushAckRequest {
+  string user_id = 1;
+  PushStrategy strategy = 2;
+  flare.access_gateway.v1.PushAckRequest push = 3;
+  string conversation_id = 4;
+}
+
+message RouterDownstreamPushCustomRequest {
+  string user_id = 1;
+  PushStrategy strategy = 2;
+  flare.access_gateway.v1.PushCustomRequest push = 3;
+  string conversation_id = 4;
+}

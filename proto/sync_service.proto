@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package flare.sync.v1;
+
+// 统一同步 gRPC：与 DATA 信道共用 `flare.common.v1.Sync` / `SyncRes`，网关只做 ExecuteSync 转发。
+import "sync.proto";
+
+service SyncService {
+  rpc ExecuteSync(flare.common.v1.Sync) returns (flare.common.v1.SyncRes);
+}

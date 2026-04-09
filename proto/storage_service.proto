@@ -1,0 +1,283 @@
+syntax = "proto3";
+
+package flare.storage.v1;
+
+import "errors.proto";
+import "event.proto";
+import "metadata.proto";
+import "message.proto";
+import "message_content.proto";
+import "enums.proto";
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// StorageReaderService（只读查询与读模型）
+// =============================================================================
+// 业务侧 gRPC，不直接使用 PayloadCommand。读写模型均使用 common：Message、Event、Pagination、TimeRange。
+// 写由 Kafka Writer 消费。
+// 同步编排能力已拆分到 `flare.sync.v1.SyncService`（sync.proto），本文件仅保留存储读侧基础查询。
+
+// ----------------------------------------------------------------------------
+// 服务
+// ----------------------------------------------------------------------------
+
+// StorageReaderService：消息查询、事件/编辑/已读/标记/反应、标签、导出
+service StorageReaderService {
+  rpc QueryMessages(QueryMessagesRequest) returns (QueryMessagesResponse);  // 按时间查询
+  rpc QueryMessagesBySeq(QueryMessagesBySeqRequest) returns (QueryMessagesBySeqResponse);  // 按序号查询
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);  // 搜索
+  rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);  // 单条获取
+  rpc QueryMessageEvents(QueryMessageEventsRequest) returns (QueryMessageEventsResponse);  // 消息事件
+  rpc QueryMessageEditHistory(QueryMessageEditHistoryRequest) returns (QueryMessageEditHistoryResponse);  // 编辑历史
+  rpc QueryMessageReadList(QueryMessageReadListRequest) returns (QueryMessageReadListResponse);  // 已读列表
+  rpc QueryMessageMarks(QueryMessageMarksRequest) returns (QueryMessageMarksResponse);  // 标记
+  rpc QueryMessageReactions(QueryMessageReactionsRequest) returns (QueryMessageReactionsResponse);  // 反应
+  rpc ListMessageTags(ListMessageTagsRequest) returns (ListMessageTagsResponse);  // 标签列表
+  rpc ExportMessages(ExportMessagesRequest) returns (ExportMessagesResponse);  // 导出
+  // 会话级事件流（与 Writer `events` 表一致，供 flare-sync-orchestrator QueryEvents）
+  rpc QueryConversationEvents(QueryConversationEventsRequest) returns (QueryConversationEventsResponse);
+  // 会话消息水位（最新消息 seq / id / 时间，避免编排层拉全量 conversation_bootstrap）
+  rpc GetConversationMessageHead(GetConversationMessageHeadRequest) returns (GetConversationMessageHeadResponse);
+}
+
+
+// ----------------------------------------------------------------------------
+// 枚举与公共模型
+// ----------------------------------------------------------------------------
+
+// 清除类型
+enum ClearType {
+  CLEAR_ALL = 0;  // 全部
+  CLEAR_BEFORE_MESSAGE = 1;  // 某条消息之前
+  CLEAR_BEFORE_TIME = 2;  // 某时间之前
+}
+
+// 消息类型
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TEXT = 1;  // 文本
+  MESSAGE_TYPE_BINARY = 2;  // 二进制
+  MESSAGE_TYPE_CUSTOM = 3;  // 自定义
+}
+
+// 可见性状态
+enum VisibilityStatus {
+  VISIBLE = 0;  // 可见
+  HIDDEN = 1;  // 软删
+  DELETED = 2;  // 已删
+}
+
+// 失败消息项
+message FailedMessage {
+  string message_id = 1;  // 消息 ID
+  flare.common.v1.ErrorCode code = 2;  // 错误码
+  string error_message = 3;  // 错误信息
+}
+
+// ----------------------------------------------------------------------------
+// 消息查询
+// ----------------------------------------------------------------------------
+
+// 按时间范围查询消息请求
+message QueryMessagesRequest {
+  string conversation_id = 1;  // 会话 ID
+  int64 start_time = 2;  // 起始时间
+  int64 end_time = 3;  // 结束时间
+  int32 limit = 4;  // 条数
+  string cursor = 5;  // 游标
+  flare.common.v1.Pagination pagination = 6;  // 分页
+}
+
+// 按时间范围查询消息响应
+message QueryMessagesResponse {
+  repeated flare.common.v1.Message messages = 1;  // 消息列表
+  string next_cursor = 2;  // 下一页游标
+  bool has_more = 3;  // 是否还有更多
+  flare.common.v1.Pagination pagination = 4;
+}
+
+// 按序号查询消息请求
+message QueryMessagesBySeqRequest {
+  string conversation_id = 1;  // 会话 ID
+  int64 after_seq = 2;  // 该序号之后（不包含）
+  int64 before_seq = 3;  // 该序号之前，0=不限制
+  int32 limit = 4;  // 条数
+  string user_id = 5;  // 可选，过滤已删
+}
+
+// 按序号查询消息响应
+message QueryMessagesBySeqResponse {
+  repeated flare.common.v1.Message messages = 1;  // 消息列表
+  string next_cursor = 2;  // 下一页游标
+  bool has_more = 3;  // 是否还有更多
+  int64 last_seq = 4;  // 最后序号
+}
+
+// 按会话顺序查询领域事件（seq 单调递增，与 sync.proto QueryEvents 对齐）
+message QueryConversationEventsRequest {
+  string conversation_id = 1;
+  int64 after_seq = 2;
+  int64 before_seq = 3;  // 0 = 不限制上界
+  int32 limit = 4;
+  repeated int32 event_type_filter = 5;  // 空 = 全部类型
+}
+
+message QueryConversationEventsResponse {
+  repeated flare.common.v1.Event events = 1;
+  int64 last_seq = 2;
+  bool has_more = 3;
+  string next_cursor = 4;
+}
+
+message GetConversationMessageHeadRequest {
+  string conversation_id = 1;
+}
+
+message GetConversationMessageHeadResponse {
+  int64 max_seq = 1;
+  string last_message_id = 2;
+  google.protobuf.Timestamp last_timestamp = 3;
+}
+
+// 搜索消息请求
+message SearchMessagesRequest {
+  repeated flare.common.v1.FilterExpression filters = 3;  // 过滤
+  repeated flare.common.v1.SortExpression sort = 4;  // 排序
+  flare.common.v1.Pagination pagination = 5;  // 分页
+  flare.common.v1.TimeRange time_range = 6;  // 时间范围
+}
+
+// 搜索消息响应
+message SearchMessagesResponse {
+  repeated flare.common.v1.Message messages = 1;  // 消息列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 获取单条消息请求
+message GetMessageRequest {
+  string message_id = 3;  // 消息 ID
+}
+
+// 获取单条消息响应
+message GetMessageResponse {
+  flare.common.v1.Message message = 1;  // 消息
+}
+
+// ----------------------------------------------------------------------------
+// 编辑/已读/标记/反应
+// ----------------------------------------------------------------------------
+
+// 编辑历史条目
+message MessageEditHistoryEntry {
+  int32 edit_version = 1;  // 编辑版本
+  flare.common.v1.MessageContent content = 2;  // 内容
+  google.protobuf.Timestamp edited_at = 3;  // 编辑时间
+  string editor_id = 4;  // 编辑者 ID
+  string reason = 5;  // 原因
+  bool show_edited_mark = 6;  // 是否显示「已编辑」
+}
+
+// 已读列表条目
+message MessageReadListEntry {
+  string user_id = 1;  // 用户 ID
+  google.protobuf.Timestamp read_at = 2;  // 阅读时间
+  google.protobuf.Timestamp burned_at = 3;  // 阅后即焚时间
+}
+
+// 标记条目
+message MessageMarkEntry {
+  string user_id = 1;  // 用户 ID
+  flare.common.v1.MarkType mark_type = 2;  // 标记类型
+  string color = 3;  // 颜色
+  google.protobuf.Timestamp marked_at = 4;  // 标记时间
+}
+
+// 反应项
+message MessageReactionItem {
+  string emoji = 1;  // 表情
+  repeated string user_ids = 2;  // 用户 ID 列表
+  int32 count = 3;  // 数量
+  google.protobuf.Timestamp last_updated = 4;  // 最后更新时间
+}
+
+// 查询消息事件请求
+message QueryMessageEventsRequest {
+  string message_id = 1;  // 消息 ID
+  repeated flare.common.v1.EventType event_types = 2;  // 事件类型，空=全部
+  flare.common.v1.Pagination pagination = 3;  // 分页
+}
+
+// 查询消息事件响应
+message QueryMessageEventsResponse {
+  repeated flare.common.v1.Event events = 1;  // 事件列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 查询消息编辑历史请求
+message QueryMessageEditHistoryRequest {
+  string message_id = 1;  // 消息 ID
+  flare.common.v1.Pagination pagination = 2;  // 分页
+}
+
+// 查询消息编辑历史响应
+message QueryMessageEditHistoryResponse {
+  repeated MessageEditHistoryEntry edit_history = 1;  // 编辑历史
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 查询消息已读列表请求
+message QueryMessageReadListRequest {
+  string message_id = 1;  // 消息 ID
+  flare.common.v1.Pagination pagination = 2;  // 分页
+}
+
+// 查询消息已读列表响应
+message QueryMessageReadListResponse {
+  repeated MessageReadListEntry read_list = 1;  // 已读列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 查询消息标记请求
+message QueryMessageMarksRequest {
+  string message_id = 1;  // 消息 ID
+  flare.common.v1.Pagination pagination = 2;  // 分页
+}
+
+// 查询消息标记响应
+message QueryMessageMarksResponse {
+  repeated MessageMarkEntry marks = 1;  // 标记列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 查询消息反应请求
+message QueryMessageReactionsRequest {
+  string message_id = 1;  // 消息 ID
+  flare.common.v1.Pagination pagination = 2;  // 分页
+}
+
+// 查询消息反应响应
+message QueryMessageReactionsResponse {
+  repeated MessageReactionItem reactions = 1;  // 反应列表
+  flare.common.v1.Pagination pagination = 2;
+}
+
+// 列出消息标签请求
+message ListMessageTagsRequest {
+}
+
+// 列出消息标签响应
+message ListMessageTagsResponse {
+  repeated string tags = 1;  // 标签列表
+}
+
+// 导出消息请求
+message ExportMessagesRequest {
+  string conversation_id = 3;  // 会话 ID
+  flare.common.v1.TimeRange time_range = 4;  // 时间范围
+  repeated flare.common.v1.FilterExpression filters = 5;  // 过滤
+}
+
+// 导出消息响应
+message ExportMessagesResponse {
+  string export_task_id = 1;  // 导出任务 ID
+}

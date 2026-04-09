@@ -1,0 +1,20 @@
+[package]
+name = "flare-grpc-proto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.0"
+authors = ["Flare Team"]
+license = "MIT"
+description = "Flare IM gRPC 服务 proto 生成（tonic client/server + 消息），依赖 flare-proto 基础类型"
+
+[dependencies]
+# 从本 crate 目录解析时，`../flare-proto` 在部分 Cargo 场景下会误解析到 workspace 上级；使用显式路径锚定到 `flare-im`。
+flare-proto = { path = "../../flare-im/flare-proto" }
+prost = "0.14"
+prost-types = "0.14"
+tonic = "0.14"
+tonic-prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+tonic-prost-build = "0.14"

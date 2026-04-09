@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package flare.push.v1;
+
+import "errors.proto";
+import "data.proto";
+import "message.proto";
+
+// =============================================================================
+// PushService：业务侧推送入口（消息 / 通知 + 可选最小任务状态）
+// 在线/离线分流由 Push Server / Worker 完成；模板、定时调度等业务侧自行实现。
+// =============================================================================
+
+service PushService {
+  rpc PushMessage(PushMessageRequest) returns (PushMessageResponse);
+  rpc PushNotification(PushNotificationRequest) returns (PushNotificationResponse);
+  rpc PushCustom(PushCustomRequest) returns (PushCustomResponse);
+  // 可选：仅返回 proxy 侧记录的粗粒度状态（如 pending）；细粒度投递结果由业务或下游观测补齐
+  rpc QueryPushStatus(QueryPushStatusRequest) returns (QueryPushStatusResponse);
+}
+
+// 推送消息请求
+message PushMessageRequest {
+  repeated string user_ids = 1;
+  flare.common.v1.Message message = 2;
+  PushOptions options = 3;
+  // 透传至 PushTaskEnvelope.metadata（与 options.metadata 合并时以本字段为准，便于调用方区分）
+  map<string, string> metadata = 4;
+}
+
+// 推送消息响应
+message PushMessageResponse {
+  int32 success_count = 1;
+  int32 fail_count = 2;
+  repeated string failed_user_ids = 3;
+  repeated PushFailure failures = 4;
+  string task_id = 5;
+}
+
+// 推送通知请求（业务通知、系统通知均可使用）
+message PushNotificationRequest {
+  repeated string user_ids = 1;
+  Notification notification = 2;
+  PushOptions options = 3;
+  map<string, string> metadata = 4;
+}
+
+// 推送通知响应
+message PushNotificationResponse {
+  int32 success_count = 1;
+  int32 fail_count = 2;
+  repeated PushFailure failures = 3;
+  string task_id = 4;
+}
+
+// 推送自定义数据（不进入会话消息序列，可用于业务透传控制信令）
+message PushCustomRequest {
+  repeated string user_ids = 1;
+  flare.common.v1.CustomData custom_data = 2;
+  PushOptions options = 3;
+  map<string, string> metadata = 4;
+}
+
+message PushCustomResponse {
+  int32 success_count = 1;
+  int32 fail_count = 2;
+  repeated string failed_user_ids = 3;
+  repeated PushFailure failures = 4;
+  string task_id = 5;
+}
+
+message PushOptions {
+  bool require_online = 1;
+  bool persist_if_offline = 2;
+  int32 priority = 3;
+  map<string, string> metadata = 4;
+  string channel = 5;
+  bool mute_when_quiet = 6;
+}
+
+message Notification {
+  string title = 1;
+  string body = 2;
+  map<string, string> data = 3;
+  map<string, string> metadata = 4;
+  string click_action = 5;
+  string icon = 6;
+  string sound = 7;
+}
+
+message PushFailure {
+  string user_id = 1;
+  int32 code = 2;
+  string error_message = 3;
+  map<string, string> metadata = 4;
+}
+
+message QueryPushStatusRequest {
+  string task_id = 1;
+}
+
+// 最小状态查询：仅 task_id + 状态字符串 + RPC 状态
+message QueryPushStatusResponse {
+  string task_id = 1;
+  string status = 2;
+}
