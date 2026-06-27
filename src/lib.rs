@@ -38,9 +38,9 @@ pub mod flare {
         }
     }
 
-    pub mod hooks {
+    pub mod capability {
         pub mod v1 {
-            tonic::include_proto!("flare.hooks.v1");
+            tonic::include_proto!("flare.capability.v1");
         }
     }
 
@@ -59,6 +59,15 @@ pub mod flare {
     pub mod sync {
         pub mod v1 {
             tonic::include_proto!("flare.sync.v1");
+        }
+    }
+
+    #[cfg(feature = "sfu_control")]
+    pub mod sfu {
+        pub mod control {
+            pub mod v1 {
+                tonic::include_proto!("flare.sfu.control.v1");
+            }
         }
     }
 }
@@ -85,8 +94,8 @@ pub mod media {
     pub use crate::flare::media::v1::*;
 }
 
-pub mod hooks {
-    pub use crate::flare::hooks::v1::*;
+pub mod capability {
+    pub use crate::flare::capability::v1::*;
 }
 
 pub mod conversation {
@@ -105,29 +114,39 @@ pub mod sync {
     pub use crate::flare::sync::v1::*;
 }
 
+/// SFU 插件控制面（`sfu_control.proto` → `flare.sfu.control.v1`）。需启用 crate feature `sfu_control`。
+#[cfg(feature = "sfu_control")]
+pub mod sfu_control {
+    pub use crate::flare::sfu::control::v1::*;
+}
+
+pub use flare_proto::PushTaskPayloadKind;
 pub use flare_proto::common::{
-    AuditContext, MediaAttachment, Pagination, PushTaskPayloadKind, ConflictResolution,
-    ConversationSummary as ConversationSummaryProto, DeleteType, MarkType, ReactionAction,
-    DeviceState as ConversationDeviceState, Message, MessageContent, MessageType, MessageStatus,
-    MessageSource, MessageTimeline, MessageReadRecord, TextContent, ImageContent, VideoContent,
-    AudioContent, FileContent, LocationContent, CardContent, NotificationContent, CustomContent,
-    ForwardContent, Mention, ImageInfo, VideoInfo, AudioInfo, OfflinePushInfo, MqEnvelope,
-    MqPayloadKind, ConnectionQuality, SyncKind, Sync, SyncRes, SingleConversationSync,
-    MultiConversationSync, ConversationsIncrementalSync, ConversationsAllSync, ConversationDetailSync,
-    QueryEventsSync, GetSyncCursorSync, UpdateSyncCursorSync, SingleConversationSyncRes,
-    MultiConversationSyncRes, ConversationsIncrementalSyncRes, ConversationsAllSyncRes,
-    ConversationDetailSyncRes, QueryEventsSyncRes, GetSyncCursorSyncRes, UpdateSyncCursorSyncRes,
-    SyncSliceItem, ConversationSyncSlice, ConversationPatchType, ConversationPatch,
-    ConversationSyncAllOptions, MultiDeviceCursor,
+    AppCardAction, AppCardContent, AudioContent, AudioInfo, AuditContext, CapabilityPacket,
+    CardContent, ConflictResolution, ContentVisibility, ConversationDetailSync,
+    ConversationDetailSyncRes, ConversationSummary as ConversationSummaryProto,
+    ConversationSyncSlice, ConversationUserSettingsSync, ConversationUserSettingsSyncRes,
+    ConversationsSync, ConversationsSyncRes, CustomContent, DataPacket, DeleteType,
+    DeviceState as ConversationDeviceState, FileContent, ForwardContent, GetSyncCursorSync,
+    GetSyncCursorSyncRes, ImageContent, ImageInfo, LocationContent, MarkType, MediaAttachment,
+    Mention, Message, MessageContent, MessageReadRecord, MessageRetentionExpiredEvent,
+    MessageRetentionLifecycle, MessageRetentionPolicy, MessageRetentionPurgedEvent,
+    MessageRetentionScheduledEvent, MessageRetentionState, MessageSource, MessageStatus,
+    MessageTimeline, MessageType, MqEnvelope, MqPayloadKind, MultiConversationSync,
+    MultiConversationSyncRes, MultiDeviceCursor, NotificationContent, OfflinePushInfo, Pagination,
+    PresenceHintPacket, QueryEventsSync, QueryEventsSyncRes, ReactionAction, RealtimeControlPacket,
+    RetentionMode, RetentionTrigger, SingleConversationSync, SingleConversationSyncRes, Sync,
+    SyncRes, SyncSliceItem, TextContent, TypingStatePacket, UpdateSyncCursorSync,
+    UpdateSyncCursorSyncRes, VideoContent, VideoInfo,
 };
 
 pub use storage::VisibilityStatus;
 
 pub use signaling::online::{
-    GetOnlineStatusRequest as SignalingGetOnlineStatusRequest,
-    GetOnlineStatusResponse as SignalingGetOnlineStatusResponse, HeartbeatRequest, HeartbeatResponse,
-    LoginRequest as SignalingLoginRequest, LoginResponse as SignalingLoginResponse, LogoutRequest,
-    LogoutResponse, DeviceInfo, UserPresence,
+    DeviceInfo, GetOnlineStatusRequest as SignalingGetOnlineStatusRequest,
+    GetOnlineStatusResponse as SignalingGetOnlineStatusResponse, HeartbeatRequest,
+    HeartbeatResponse, LoginRequest as SignalingLoginRequest,
+    LoginResponse as SignalingLoginResponse, LogoutRequest, LogoutResponse, UserPresence,
 };
 
 pub use signaling::router::{
@@ -137,12 +156,14 @@ pub use signaling::router::{
 };
 
 pub use push::{
-    Notification as PushNotificationContent, PushCustomRequest as PushPushCustomRequest,
-    PushCustomResponse as PushPushCustomResponse, PushFailure,
-    PushMessageRequest as PushPushMessageRequest, PushMessageResponse as PushPushMessageResponse,
+    DevicePushProvider, Notification as PushNotificationContent,
+    PushCustomRequest as PushPushCustomRequest, PushCustomResponse as PushPushCustomResponse,
+    PushFailure, PushMessageRequest as PushPushMessageRequest,
+    PushMessageResponse as PushPushMessageResponse,
     PushNotificationRequest as PushPushNotificationRequest,
     PushNotificationResponse as PushPushNotificationResponse, PushOptions, QueryPushStatusRequest,
-    QueryPushStatusResponse,
+    QueryPushStatusResponse, RegisterDevicePushTokenRequest, RegisterDevicePushTokenResponse,
+    UnregisterDevicePushTokenRequest, UnregisterDevicePushTokenResponse,
 };
 
 pub use storage::{
@@ -169,25 +190,27 @@ pub use media::{
     UploadMultipartChunkResponse, VideoOperation, WatermarkOperation,
 };
 
-pub use hooks::{
-    CustomHookRequest, CustomHookResponse, DeliveryHookRequest as ProtoDeliveryHookRequest,
-    DeliveryHookResponse as ProtoDeliveryHookResponse, HookDeliveryEvent as ProtoHookDeliveryEvent,
+pub use capability::{
+    ConversationLifecycleHookRequest, ConversationLifecycleHookResponse, CustomHookRequest,
+    CustomHookResponse, DeliveryHookRequest as ProtoDeliveryHookRequest,
+    DeliveryHookResponse as ProtoDeliveryHookResponse, GenericRequest, GenericResponse,
+    HookDeliveryEvent as ProtoHookDeliveryEvent,
     HookInvocationContext as ProtoHookInvocationContext, HookMessageDraft as ProtoHookMessageDraft,
-    HookMessageRecord as ProtoHookMessageRecord, PostSendHookRequest as ProtoPostSendHookRequest,
-    PostSendHookResponse as ProtoPostSendHookResponse, PreSendHookRequest as ProtoPreSendHookRequest,
-    PreSendHookResponse as ProtoPreSendHookResponse, RecallHookRequest as ProtoRecallHookRequest,
-    RecallHookResponse as ProtoRecallHookResponse, HookRecallEvent as ProtoHookRecallEvent,
-    PresenceHookRequest, PresenceHookResponse, ConversationLifecycleHookRequest,
-    ConversationLifecycleHookResponse,
+    HookMessageRecord as ProtoHookMessageRecord, HookRecallEvent as ProtoHookRecallEvent,
+    PostSendHookRequest as ProtoPostSendHookRequest,
+    PostSendHookResponse as ProtoPostSendHookResponse,
+    PreSendHookRequest as ProtoPreSendHookRequest, PreSendHookResponse as ProtoPreSendHookResponse,
+    PresenceHookRequest, PresenceHookResponse, RecallHookRequest as ProtoRecallHookRequest,
+    RecallHookResponse as ProtoRecallHookResponse,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use conversation::{
-    DevicePresence as ConversationDevicePresence,
+    ConversationBootstrapRequest, ConversationBootstrapResponse, ConversationPolicy,
+    DevicePresence as ConversationDevicePresence, ForceConversationSyncRequest,
     ListConversationsRequest as ConversationListConversationsRequest,
-    ListConversationsResponse as ConversationListConversationsResponse, ConversationBootstrapRequest,
-    ConversationBootstrapResponse, SortOrder as ConversationSortOrder, ForceConversationSyncRequest,
-    ConversationPolicy, SyncMessagesRequest as ConversationSyncMessagesRequest,
+    ListConversationsResponse as ConversationListConversationsResponse,
+    SortOrder as ConversationSortOrder, SyncMessagesRequest as ConversationSyncMessagesRequest,
     SyncMessagesResponse as ConversationSyncMessagesResponse, UpdateCursorRequest,
     UpdatePresenceRequest,
 };

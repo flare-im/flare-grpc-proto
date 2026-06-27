@@ -22,8 +22,8 @@ import "access_gateway.proto";
 // RouterUpstreamService（上行路由服务）
 // =============================================================================
 // 处理客户端上行请求，按类型路由到不同的下游服务：
-// - RouteMessage：上行 MESSAGE → common.Message → 编排 SendMessage
-// - RouteEvent：上行 EVENT → common.Event → 编排 ExecuteEvent
+// - RouteMessage：上行 MESSAGE → common.Message → 编排 MessageSendService.SendMessage
+// - RouteEvent：上行 EVENT → common.Event → 编排 MessageEventService.ExecuteEvent
 // - RouteAck：上行 ACK（Push / Conversation / Batch）→ Push Proxy / Kafka
 // - RouteData：上行 DATA（UserCustom 内层）→ common.CustomData
 
@@ -33,8 +33,8 @@ import "access_gateway.proto";
 
 // RouterUpstreamService：处理上行请求（Message、Event、Ack、Data）
 service RouterUpstreamService {
-  rpc RouteMessage(RouteMessageRequest) returns (RouteMessageResponse);  // 上行消息 → SendMessage
-  rpc RouteEvent(RouteEventRequest) returns (RouteEventResponse);  // 上行操作事件 → ExecuteEvent
+  rpc RouteMessage(RouteMessageRequest) returns (RouteMessageResponse);  // 上行消息 → MessageSendService.SendMessage
+  rpc RouteEvent(RouteEventRequest) returns (RouteEventResponse);  // 上行操作事件 → MessageEventService.ExecuteEvent
   rpc RouteAck(RouteAckRequest) returns (RouteAckResponse);  // 上行客户端 ACK → Push Proxy
   rpc RouteData(RouteDataRequest) returns (RouteDataResponse);  // 上行 CustomData（DATA/user_custom）
 }

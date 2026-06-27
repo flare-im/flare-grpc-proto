@@ -95,6 +95,10 @@ message PushEventRequest {
   repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
   repeated flare.common.v1.Event events = 2;   // 事件列表；与 common/event Event 一致
   PushOptions options = 3;
+  string conversation_id = 4;                  // 纯 ping 或单会话事件批的会话 ID
+  uint64 max_conversation_seq = 5;             // 纯 ping 的服务端当前水位；有 events 时可省略由网关计算
+  flare.common.v1.EventEnvelopeDeliveryMode delivery_mode = 6; // 为空则由网关按 events 推断
+  bool inline_events_truncated = 7;            // true 表示 events 不是完整连续批，客户端必须按 seq 补拉
 }
 
 message PushNotificationRequest {

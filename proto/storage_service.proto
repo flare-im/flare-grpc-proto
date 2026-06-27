@@ -34,6 +34,7 @@ service StorageReaderService {
   rpc QueryMessageReactions(QueryMessageReactionsRequest) returns (QueryMessageReactionsResponse);  // 反应
   rpc ListMessageTags(ListMessageTagsRequest) returns (ListMessageTagsResponse);  // 标签列表
   rpc ExportMessages(ExportMessagesRequest) returns (ExportMessagesResponse);  // 导出
+  rpc QueryMessageWriteLedger(QueryMessageWriteLedgerRequest) returns (QueryMessageWriteLedgerResponse);  // 写链路账本
   // 会话级事件流（与 Writer `events` 表一致，供 flare-sync-orchestrator QueryEvents）
   rpc QueryConversationEvents(QueryConversationEventsRequest) returns (QueryConversationEventsResponse);
   // 会话消息水位（最新消息 seq / id / 时间，避免编排层拉全量 conversation_bootstrap）
@@ -86,6 +87,7 @@ message QueryMessagesRequest {
   int32 limit = 4;  // 条数
   string cursor = 5;  // 游标
   flare.common.v1.Pagination pagination = 6;  // 分页
+  bool include_burned_placeholder = 7;  // 是否返回“该消息已销毁”占位
 }
 
 // 按时间范围查询消息响应
@@ -103,6 +105,7 @@ message QueryMessagesBySeqRequest {
   int64 before_seq = 3;  // 该序号之前，0=不限制
   int32 limit = 4;  // 条数
   string user_id = 5;  // 可选，过滤已删
+  bool include_burned_placeholder = 6;  // 是否返回“该消息已销毁”占位
 }
 
 // 按序号查询消息响应
@@ -280,4 +283,40 @@ message ExportMessagesRequest {
 // 导出消息响应
 message ExportMessagesResponse {
   string export_task_id = 1;  // 导出任务 ID
+}
+
+// ----------------------------------------------------------------------------
+// 写链路账本查询（Admin/运维）
+// ----------------------------------------------------------------------------
+
+message QueryMessageWriteLedgerRequest {
+  string tenant_id = 1;  // 必填，管理端可显式覆盖请求上下文租户
+  string server_id = 2;  // 可选，服务端消息 ID
+  string conversation_id = 3;  // 可选，会话 ID
+  string write_state = 4;  // 可选，ack_published / *_failed 等
+  bool failed_only = 5;  // true 时只查 failed_at 非空
+  int64 updated_after = 6;  // 可选，Unix 秒
+  int64 updated_before = 7;  // 可选，Unix 秒
+  flare.common.v1.Pagination pagination = 8;  // cursor 为 offset 字符串
+}
+
+message MessageWriteLedgerEntry {
+  string tenant_id = 1;
+  string server_id = 2;
+  string conversation_id = 3;
+  int64 seq = 4;
+  string write_state = 5;
+  google.protobuf.Timestamp archive_persisted_at = 6;
+  google.protobuf.Timestamp storage_persisted_at = 7;
+  google.protobuf.Timestamp wal_cleaned_at = 8;
+  google.protobuf.Timestamp ack_published_at = 9;
+  google.protobuf.Timestamp failed_at = 10;
+  string last_error = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message QueryMessageWriteLedgerResponse {
+  repeated MessageWriteLedgerEntry entries = 1;
+  flare.common.v1.Pagination pagination = 2;
 }

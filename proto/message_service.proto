@@ -15,41 +15,41 @@ import "models.proto";
 import "data.proto";
 
 // =============================================================================
-// Message 域（发送 / 操作；单条/列表/搜索等读模型由 Storage Reader 服务提供）
+// Message 域（发送 / 事件 / 操作；单条/列表/搜索等读模型由 Storage Reader 服务提供）
 // =============================================================================
 // 业务侧 gRPC，不直接使用 PayloadCommand。上行发消息/事件、下行回执由网关封装为 PayloadCommand(MESSAGE/EVENT/ACK)。
 // 复用 common：Message、Event、Ack、Pagination。
 //
 // MessageSendService 与 signaling/router.proto 的 RouterUpstreamService 对齐（网关 Route* → 业务编排）：
 // - SendMessage / BatchSendMessage ↔ RouteMessage（上行 MESSAGE）
-// - ExecuteEvent ↔ RouteEvent（上行 EVENT）
 // - SendAck ↔ RouteAck（上行客户端 ACK：Push / Conversation / Batch）
 // - SendCustomData ↔ RouteData（上行 CustomData / USER_CUSTOM）
+// MessageEventService 单独承接事件命令：
+// - ExecuteEvent ↔ RouteEvent（上行 EVENT）
 
 // ----------------------------------------------------------------------------
 // 服务
 // ----------------------------------------------------------------------------
 
-// MessageSendService：发送消息、批量发送、系统消息、操作事件、上行 ACK、上行 CustomData（与 RouterUpstream 一一对应）
+// MessageSendService：发送消息、批量发送、系统消息、上行 ACK、上行 CustomData
 service MessageSendService {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);  // 发送消息（↔ RouteMessage）
   rpc BatchSendMessage(BatchSendMessageRequest) returns (BatchSendMessageResponse);  // 批量发送
   rpc SendSystemMessage(SendSystemMessageRequest) returns (SendSystemMessageResponse);  // 系统消息
-  rpc ExecuteEvent(ExecuteEventRequest) returns (google.protobuf.Empty);  // 上行操作事件（↔ RouteEvent）
   rpc SendAck(SendAckRequest) returns (SendAckResponse);  // 上行客户端 ACK（↔ RouteAck）
   rpc SendCustomData(SendCustomDataRequest) returns (SendCustomDataResponse);  // 上行 CustomData（↔ RouteData）
 }
 
-// MessageActionService：撤回/编辑/删除、已读、反应、置顶、标记
+// MessageEventService：上行操作事件入口，由 orchestrator 持有事件编排职责
+service MessageEventService {
+  rpc ExecuteEvent(ExecuteEventRequest) returns (google.protobuf.Empty);  // 上行操作事件（↔ RouteEvent）
+}
+
+// MessageActionService：撤回/编辑/删除、反应、置顶、标记
 service MessageActionService {
   rpc RecallMessage(RecallMessageRequest) returns (RecallMessageResponse);  // 撤回
   rpc EditMessage(EditMessageRequest) returns (EditMessageResponse);  // 编辑
   rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);  // 删除
-  rpc MarkMessageRead(MarkMessageReadRequest) returns (MarkMessageReadResponse);  // 单条已读
-  rpc BatchMarkMessageRead(BatchMarkMessageReadRequest) returns (BatchMarkMessageReadResponse);  // 批量已读
-  rpc MarkMessagesReadUntil(MarkMessagesReadUntilRequest) returns (MarkMessagesReadUntilResponse);  // 已读到某条
-  rpc MarkConversationRead(MarkConversationReadRequest) returns (MarkConversationReadResponse);  // 会话已读
-  rpc MarkAllConversationsRead(MarkAllConversationsReadRequest) returns (MarkAllConversationsReadResponse);  // 全部已读
   rpc AddReaction(AddReactionRequest) returns (AddReactionResponse);  // 添加反应
   rpc RemoveReaction(RemoveReactionRequest) returns (RemoveReactionResponse);  // 移除反应
   rpc PinMessage(PinMessageRequest) returns (PinMessageResponse);  // 置顶
@@ -72,11 +72,14 @@ message SendMessageRequest {
 
 // 发送消息响应
 message SendMessageResponse {
-  bool success = 1;  // 是否成功（同步=已持久化，异步=已入队）
+  bool success = 1;  // 是否成功；实际可靠性边界以 durability 为准
   string server_msg_id = 2;  // 服务端消息 ID（全局唯一）
-  uint64 seq = 3;  // 服务端序号
+  uint64 conversation_seq = 3;  // 会话 replay 序号
   google.protobuf.Timestamp sent_at = 4;  // 发送时间
   flare.common.v1.MessageTimeline timeline = 5;  // 时间线（持久化/投递/已读等）
+  flare.common.v1.SendAckDurability durability = 6;  // 成功 ACK 已跨过的最高可靠性边界
+
+  reserved "seq";
 }
 
 // 批量发送消息请求
@@ -88,7 +91,7 @@ message BatchSendMessageRequest {
 message BatchSendMessageResponse {
   int32 success_count = 1;  // 成功数
   int32 fail_count = 2;  // 失败数
-  repeated string message_ids = 3;  // 成功的消息 ID 列表（按请求顺序）
+  repeated SendMessageResponse successes = 3;  // 成功详情（按请求顺序）
   repeated FailedMessage failures = 4;  // 失败详情
 }
 
@@ -112,11 +115,18 @@ message SendSystemMessageResponse {
   string message_id = 2;  // 消息 ID（成功时返回）
 }
 
+// MessageEventService（事件）
+// ----------------------------------------------------------------------------
+
 // 执行操作事件请求（与 RouterUpstream.RouteEventRequest 对齐）
 message ExecuteEventRequest {
   string svid = 1;  // 业务系统标识，如 svid.im
   flare.common.v1.Event event = 2;  // 领域事件（撤回/编辑/已读等）
 }
+
+// ----------------------------------------------------------------------------
+// MessageSendService（ACK / CustomData）
+// ----------------------------------------------------------------------------
 
 // 上行客户端 ACK 请求（与 RouterUpstream.RouteAckRequest 对齐）
 message SendAckRequest {
@@ -174,22 +184,6 @@ message DeleteMessageResponse {
   int32 deleted_count = 2;  // 实际删除条数
 }
 
-// 标记消息已读请求（与 ReadReceiptEvent 对齐；user_id 由 metadata 注入）
-message MarkMessageReadRequest {
-  string message_id = 1;
-  google.protobuf.Timestamp read_at = 2;
-  bool burn_after_read = 3;
-}
-
-// 标记消息已读响应
-message MarkMessageReadResponse {
-  bool success = 1;  // 是否标记成功
-  string error_message = 2;  // 失败时错误描述
-  google.protobuf.Timestamp read_at = 3;  // 已读时间
-  google.protobuf.Timestamp burned_at = 4;  // 阅后即焚销毁时间（若启用）
-}
-
-
 // 编辑消息请求（与 MessageEditEvent 对齐；operator_id 由 metadata 注入）
 message EditMessageRequest {
   string message_id = 1;
@@ -246,6 +240,7 @@ message PinMessageRequest {
   string message_id = 1;
   string reason = 2;
   google.protobuf.Timestamp expire_at = 3;
+  flare.common.v1.MessagePinScope scope = 4;
 }
 
 // 置顶消息响应
@@ -258,6 +253,7 @@ message PinMessageResponse {
 // 取消置顶请求（与 UnpinEvent 对齐；operator_id 由 metadata 注入）
 message UnpinMessageRequest {
   string message_id = 1;
+  flare.common.v1.MessagePinScope scope = 2;
 }
 
 // 取消置顶响应
@@ -294,80 +290,4 @@ message UnmarkMessageRequest {
 message UnmarkMessageResponse {
   bool success = 1;  // 是否取消成功
   string error_message = 2;  // 错误描述
-}
-
-// ----------------------------------------------------------------------------
-// 批量已读相关
-// ----------------------------------------------------------------------------
-
-// 批量标记已读请求（user_id 由 metadata 注入）
-message BatchMarkMessageReadRequest {
-  string conversation_id = 1;
-  repeated string message_ids = 2;  // 空则标记会话内全部未读
-  google.protobuf.Timestamp read_at = 3;
-  bool burn_after_read = 4;
-}
-
-// 范围标记已读请求（user_id 由 metadata 注入）
-message MarkMessagesReadUntilRequest {
-  string conversation_id = 1;
-  string until_message_id = 2;
-  google.protobuf.Timestamp read_at = 3;
-  bool burn_after_read = 4;
-}
-
-// 范围标记已读响应
-message MarkMessagesReadUntilResponse {
-  bool success = 1;  // 是否标记成功
-  string error_message = 2;  // 错误描述
-  int32 read_count = 3;  // 已读消息数
-  google.protobuf.Timestamp read_at = 4;  // 已读时间
-}
-
-// 批量标记已读响应
-message BatchMarkMessageReadResponse {
-  bool success = 1;  // 是否标记成功
-  string error_message = 2;  // 错误描述
-  int32 read_count = 3;  // 已读消息数
-  google.protobuf.Timestamp read_at = 4;  // 已读时间
-}
-
-// 标记会话已读请求（user_id 由 metadata 注入）
-message MarkConversationReadRequest {
-  string conversation_id = 1;
-  google.protobuf.Timestamp read_at = 2;
-  bool burn_after_read = 3;
-}
-
-// 标记会话已读响应
-message MarkConversationReadResponse {
-  bool success = 1;  // 是否标记成功
-  string error_message = 2;  // 失败时错误描述
-  int32 read_count = 3;  // 本次已读消息数
-  google.protobuf.Timestamp read_at = 4;  // 已读时间
-  string last_read_message_id = 5;  // 最后一条已读消息 ID（客户端更新已读位置）
-}
-
-// 标记全部会话已读请求（user_id 由 metadata 注入）
-message MarkAllConversationsReadRequest {
-  google.protobuf.Timestamp read_at = 1;
-  bool burn_after_read = 2;
-  repeated string conversation_types = 3;  // 空表示全部类型
-}
-
-// 标记全部会话已读响应
-message MarkAllConversationsReadResponse {
-  bool success = 1;  // 是否标记成功
-  string error_message = 2;  // 失败时错误描述
-  int32 conversation_count = 3;  // 本次已读会话数
-  int32 total_read_count = 4;  // 本次已读消息总数
-  google.protobuf.Timestamp read_at = 5;  // 已读时间
-  repeated ConversationReadStat conversation_stats = 6;  // 各会话已读统计，可选
-}
-
-// 会话已读统计
-message ConversationReadStat {
-  string conversation_id = 1;  // 会话 ID
-  int32 read_count = 2;  // 已读消息数
-  string last_read_message_id = 3;  // 最后一条已读消息 ID
 }

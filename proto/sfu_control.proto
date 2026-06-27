@@ -1,0 +1,431 @@
+syntax = "proto3";
+
+package flare.sfu.control.v1;
+
+// =============================================================================
+// SFU 插件控制面（flare-strom-sfu）
+// =============================================================================
+// 架构约束（对标飞书类会议系统）：
+// - **不**在 SFU 进程内维护面向终端的 TCP/WebSocket 长连接；信令由 IM Core 接收后经本 API 下发。
+// - SFU 负责 **UDP 媒体面**（RTP/RTCP）、转发、NACK/FEC/BWE/Simulcast 等策略（实现渐进落地）。
+// - 事件上行：IM Core 通过 `SubscribeEvents` 建立 **server-stream** 接收 SFU 主动推送。
+// 错误统一走 gRPC `Status`。
+
+service SfuControl {
+  // --- 生命周期 ---
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc CreateRoom(CreateRoomRequest) returns (CreateRoomResponse);
+  rpc CloseRoom(CloseRoomRequest) returns (CloseRoomResponse);
+  rpc GetRoomSummary(GetRoomSummaryRequest) returns (GetRoomSummaryResponse);
+  rpc GetRoomState(GetRoomStateRequest) returns (GetRoomStateResponse);
+
+  // 与会话绑定：IM 在 `GetJoinToken` 后或直连接 `JoinRoom` 分配 peer/session。
+  rpc AcceptCall(AcceptCallRequest) returns (AcceptCallResponse);
+  rpc GetJoinToken(GetJoinTokenRequest) returns (GetJoinTokenResponse);
+  rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+  rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+  rpc HangupCall(HangupCallRequest) returns (HangupCallResponse);
+
+  // --- 显式 WebRTC 信令（推荐 IM 主路径）---
+  rpc HandleSdpOffer(HandleSdpOfferRequest) returns (HandleSdpOfferResponse);
+  rpc HandleSdpAnswer(HandleSdpAnswerRequest) returns (HandleSdpAnswerResponse);
+  rpc AddIceCandidate(AddIceCandidateRequest) returns (AddIceCandidateResponse);
+  // 泛型 JSON 信令（仅用于明确声明的 relay 模式）。
+  rpc RelaySignal(RelaySignalRequest) returns (RelaySignalResponse);
+
+  // --- 订阅 / Simulcast / 发布者静音（不重协商 SDP 的软控制）---
+  rpc SetSubscription(SetSubscriptionRequest) returns (SetSubscriptionResponse);
+  rpc SetSimulcastLayer(SetSimulcastLayerRequest) returns (SetSimulcastLayerResponse);
+  rpc SetPublisherMute(SetPublisherMuteRequest) returns (SetPublisherMuteResponse);
+
+  // --- 弱网与观测（首版可返回占位/聚合指标；后续接 TWCC/REMB 与 per-peer 统计）---
+  rpc GetPeerNetworkQuality(GetPeerNetworkQualityRequest) returns (GetPeerNetworkQualityResponse);
+
+  // --- 事件上行（SFU -> IM）---
+  rpc SubscribeEvents(SubscribeEventsRequest) returns (stream SfuEvent);
+
+  // --- 运维 ---
+  rpc StartDrain(StartDrainRequest) returns (StartDrainResponse);
+  rpc RegisterInstance(RegisterInstanceRequest) returns (RegisterInstanceResponse);
+  rpc InstanceHeartbeat(InstanceHeartbeatRequest) returns (InstanceHeartbeatResponse);
+  rpc QueryInstanceStatus(QueryInstanceStatusRequest) returns (QueryInstanceStatusResponse);
+  rpc DisableInstance(DisableInstanceRequest) returns (DisableInstanceResponse);
+}
+
+// =============================================================================
+// 公共枚举
+// =============================================================================
+
+enum MediaKind {
+  MEDIA_KIND_UNSPECIFIED = 0;
+  MEDIA_KIND_AUDIO = 1;
+  MEDIA_KIND_VIDEO = 2;
+}
+
+// 客户端 Simulcast / 分层选择（与浏览器 rid / spatial index 映射由插件实现约定）。
+enum SimulcastLayer {
+  SIMULCAST_LAYER_UNSPECIFIED = 0;
+  SIMULCAST_LAYER_HIGH = 1;
+  SIMULCAST_LAYER_MEDIUM = 2;
+  SIMULCAST_LAYER_LOW = 3;
+}
+
+// =============================================================================
+// 生命周期
+// =============================================================================
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string instance_id = 1;
+  string version = 2;
+  bool draining = 3;
+  uint64 active_peers = 4;
+  uint64 registered_room_slots = 5;
+}
+
+message CreateRoomRequest {
+  string request_id = 1;
+  string room_id = 2;
+  map<string, string> metadata = 3;
+  // 可选：JSON 字符串，含 nack_window_ms_video/audio、enable_transport_cc、fec_hint 等（见插件文档）。
+  optional string media_policy_json = 4;
+}
+
+message CreateRoomResponse {
+  string room_id = 1;
+  bool created = 2;
+  string call_id = 3;
+  string signaling_ws_base = 4;
+  string instance_id = 5;
+}
+
+message GetRoomSummaryRequest {
+  string request_id = 1;
+  string room_id = 2;
+}
+
+message GetRoomSummaryResponse {
+  string room_id = 1;
+  uint32 peer_count = 2;
+  bool draining = 3;
+  bool exists = 4;
+}
+
+message GetRoomStateRequest {
+  string request_id = 1;
+  string room_id = 2;
+}
+
+message GetRoomStateResponse {
+  string room_id = 1;
+  bool exists = 2;
+  uint64 revision = 3;
+  // JSON: { peers, published, state, revision } — 与 WS Joined 快照同构。
+  string room_snapshot_json = 4;
+}
+
+message CloseRoomRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string tenant_id = 3;
+}
+
+message CloseRoomResponse {
+  string room_id = 1;
+  bool removed_if_vacant = 2;
+}
+
+message AcceptCallRequest {
+  string request_id = 1;
+  string call_id = 2;
+  string user_id = 3;
+  string tenant_id = 4;
+}
+
+message AcceptCallResponse {
+  string call_id = 1;
+  string room_id = 2;
+  string signaling_ws_base = 3;
+  string instance_id = 4;
+}
+
+message GetJoinTokenRequest {
+  string request_id = 1;
+  string call_id = 2;
+  string user_id = 3;
+  string tenant_id = 4;
+}
+
+message GetJoinTokenResponse {
+  string token = 1;
+  uint32 ttl_seconds = 2;
+  string room_id = 3;
+  string signaling_ws_base = 4;
+  string instance_id = 5;
+}
+
+message JoinRoomRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string call_id = 3;
+  string user_id = 4;
+  string tenant_id = 5;
+  string role = 6;
+  // 若为空则由 SFU 生成新的 peer_id（推荐由服务端分配）。
+  optional string peer_id = 7;
+}
+
+message JoinRoomResponse {
+  string room_id = 1;
+  string peer_id = 2;
+  string session_id = 3;
+  string call_id = 4;
+  // late-join 房间快照（peers + published tracks），JSON 与 GetRoomStateResponse 一致。
+  string room_snapshot_json = 5;
+}
+
+message LeaveRoomRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string peer_id = 3;
+  string session_id = 4;
+  string user_id = 5;
+}
+
+message LeaveRoomResponse {
+  bool left = 1;
+}
+
+message HangupCallRequest {
+  string request_id = 1;
+  string call_id = 2;
+  string user_id = 3;
+  string tenant_id = 4;
+  bool close_room_if_vacant = 5;
+}
+
+message HangupCallResponse {
+  string call_id = 1;
+}
+
+// =============================================================================
+// 信令
+// =============================================================================
+
+message HandleSdpOfferRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string peer_id = 3;
+  string sdp_offer = 4;
+}
+
+message HandleSdpOfferResponse {
+  string sdp_answer = 1;
+}
+
+message HandleSdpAnswerRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string peer_id = 3;
+  string sdp_answer = 4;
+}
+
+message HandleSdpAnswerResponse {
+  bool accepted = 1;
+}
+
+message AddIceCandidateRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string peer_id = 3;
+  // 浏览器 `RTCIceCandidate.toJSON()` 序列化字符串。
+  string candidate_json = 4;
+}
+
+message AddIceCandidateResponse {
+  bool accepted = 1;
+}
+
+message RelaySignalRequest {
+  string request_id = 1;
+  string call_id = 2;
+  string tenant_id = 3;
+  string kind = 4;
+  string payload_json = 5;
+}
+
+message RelaySignalResponse {
+  bool accepted = 1;
+}
+
+// =============================================================================
+// 订阅 / Simulcast / 静音
+// =============================================================================
+
+message SetSubscriptionRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string subscriber_peer_id = 3;
+  string track_id = 4;
+  bool enable = 5;
+  MediaKind media = 6;
+  SimulcastLayer preferred_layer = 7;
+  uint32 priority = 8;
+}
+
+message SetSubscriptionResponse {
+  bool applied = 1;
+}
+
+message SetSimulcastLayerRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string subscriber_peer_id = 3;
+  string track_id = 4;
+  SimulcastLayer layer = 5;
+}
+
+message SetSimulcastLayerResponse {
+  bool applied = 1;
+}
+
+message SetPublisherMuteRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string publisher_peer_id = 3;
+  bool mute_audio = 4;
+  bool mute_video = 5;
+}
+
+message SetPublisherMuteResponse {
+  bool applied = 1;
+}
+
+// =============================================================================
+// 网络质量（下行聚合；细粒度 TWCC 后续填充）
+// =============================================================================
+
+message GetPeerNetworkQualityRequest {
+  string request_id = 1;
+  string room_id = 2;
+  string peer_id = 3;
+}
+
+message NetworkQuality {
+  uint32 upstream_score = 1;    // 0-100，越大越好
+  uint32 downstream_score = 2;
+  uint32 rtt_ms = 3;
+  float packet_loss_ratio = 4;  // 0.0 - 1.0
+}
+
+message GetPeerNetworkQualityResponse {
+  NetworkQuality quality = 1;
+  bool has_data = 2;
+}
+
+// =============================================================================
+// 事件流（SFU -> IM）
+// =============================================================================
+
+message SubscribeEventsRequest {
+  string consumer_id = 1;
+  optional string room_id = 2;
+  uint64 after_seq = 3;
+}
+
+message AudioLevelIndication {
+  string room_id = 1;
+  string peer_id = 2;
+  string user_id = 3;
+  uint32 linear_level = 4;  // 0-32767 量级由实现定义，IM 仅做相对 UI
+  bool voice_active = 5;
+}
+
+message NetworkQualityEvent {
+  string room_id = 1;
+  string peer_id = 2;
+  NetworkQuality quality = 3;
+}
+
+enum PeerLifecycleKind {
+  PEER_LIFECYCLE_KIND_UNSPECIFIED = 0;
+  PEER_LIFECYCLE_KIND_JOINED = 1;
+  PEER_LIFECYCLE_KIND_LEFT = 2;
+  PEER_LIFECYCLE_KIND_MEDIA_SESSION_CLOSED = 3;
+}
+
+message PeerLifecycleEvent {
+  PeerLifecycleKind kind = 1;
+  string room_id = 2;
+  string peer_id = 3;
+  string user_id = 4;
+}
+
+message BweCongestionHintEvent {
+  string room_id = 1;
+  string peer_id = 2;
+  bool congested = 3;
+  uint32 suggested_cap_kbps = 4;
+}
+
+message SfuEvent {
+  uint64 seq = 1;
+  int64 server_ts_unix_ms = 2;
+  oneof payload {
+    AudioLevelIndication audio_level = 10;
+    NetworkQualityEvent network_quality = 11;
+    PeerLifecycleEvent peer_lifecycle = 12;
+    BweCongestionHintEvent bwe_hint = 13;
+  }
+}
+
+// =============================================================================
+// 运维
+// =============================================================================
+
+message StartDrainRequest {
+  string request_id = 1;
+}
+
+message StartDrainResponse {
+  bool accepted = 1;
+}
+
+message RegisterInstanceRequest {
+  string instance_id = 1;
+  string control_grpc_endpoint = 2;
+  string control_http_base = 3;
+}
+
+message RegisterInstanceResponse {
+  bool accepted = 1;
+}
+
+message InstanceHeartbeatRequest {
+  string instance_id = 1;
+  uint64 seq = 2;
+}
+
+message InstanceHeartbeatResponse {
+  bool ack = 1;
+}
+
+message QueryInstanceStatusRequest {
+  string instance_id = 1;
+}
+
+message QueryInstanceStatusResponse {
+  string instance_id = 1;
+  bool draining = 2;
+  uint64 registered_room_slots = 3;
+  bool disabled = 4;
+}
+
+message DisableInstanceRequest {
+  string instance_id = 1;
+}
+
+message DisableInstanceResponse {
+  bool disabled = 1;
+}

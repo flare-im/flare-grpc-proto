@@ -31,19 +31,19 @@ service ConversationReadService {
   rpc ConversationBootstrap(ConversationBootstrapRequest) returns (ConversationBootstrapResponse);
   rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
   rpc GetConversationDetail(GetConversationDetailRequest) returns (GetConversationDetailResponse);
-  rpc GetConversationMembers(GetConversationMembersRequest) returns (GetConversationMembersResponse);  // 获取会话成员ID列表
+  rpc ListConversationParticipants(ListConversationParticipantsRequest) returns (ListConversationParticipantsResponse);  // 分页获取会话参与者（唯一成员读路径）
 }
 
-/// ConversationManageService：会话写模型与侧效应（创建/更新/删除、参与者、游标、已读、在线、搜索等）
+/// ConversationManageService：会话写模型与侧效应（创建/更新/删除、参与者、同步游标、已读、在线、搜索等）
 service ConversationManageService {
   rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);  // 创建会话
   rpc UpdateConversation(UpdateConversationRequest) returns (UpdateConversationResponse);  // 更新会话
   rpc DeleteConversation(DeleteConversationRequest) returns (google.protobuf.Empty);  // 删除会话
   rpc ManageParticipants(ManageParticipantsRequest) returns (ManageParticipantsResponse);  // 管理参与者
-  rpc BatchAcknowledge(BatchAcknowledgeRequest) returns (google.protobuf.Empty);  // 批量已读
   rpc SearchConversations(SearchConversationsRequest) returns (SearchConversationsResponse);  // 搜索会话
-  rpc UpdateCursor(UpdateCursorRequest) returns (google.protobuf.Empty);  // 更新已读/同步游标
+  rpc UpdateCursor(UpdateCursorRequest) returns (google.protobuf.Empty);  // 更新同步游标
   rpc MarkConversationAsRead(MarkConversationAsReadRequest) returns (google.protobuf.Empty);  // 标记已读
+  rpc UpdateConversationUserSettings(UpdateConversationUserSettingsRequest) returns (UpdateConversationUserSettingsResponse);  // 用户会话偏好
   rpc UpdatePresence(UpdatePresenceRequest) returns (google.protobuf.Empty);  // 更新在线状态
   rpc ForceConversationSync(ForceConversationSyncRequest) returns (google.protobuf.Empty);  // 强制刷新（内部命令）
 }
@@ -71,30 +71,23 @@ enum SortOrder {
 
 // --- 会话列表/全量/详情 消息体（供 DATA 信道 `flare.sync.v1.Sync`、客户端序列化等复用；不再挂在本域 gRPC service 上）---
 
-/// 同步会话（增量）请求：游标 + 条数
+/// 同步会话列表请求：cursor 空=冷启动，非空=增量
 message SyncConversationsRequest {
-  google.protobuf.Timestamp client_conversation_cursor = 1;  // 客户端会话游标
-  int32 limit = 2;  // 本批条数
+  google.protobuf.Timestamp client_conversation_cursor = 1;
+  int32 limit = 2;
+  bool include_archived = 3;
+  bool include_deleted = 4;
+  reserved 5 to 49;
+  map<string, string> ext = 50;
 }
 
-/// 同步会话（增量）响应：patches + 服务端游标
+/// 同步会话列表响应
 message SyncConversationsResponse {
-  repeated flare.common.v1.ConversationPatch patches = 1;
-  google.protobuf.Timestamp server_conversation_cursor = 2;
-  bool has_more = 3;
-}
-
-/// 全量会话请求：选项（含归档/删除、批次大小等）
-message ConversationSyncAllRequest {
-  flare.common.v1.ConversationSyncAllOptions sync_options = 1;
-}
-
-/// 全量会话响应：会话列表 + 游标 + 元数据
-message ConversationSyncAllResponse {
   repeated flare.common.v1.ConversationSummary conversations = 1;
   google.protobuf.Timestamp server_conversation_cursor = 2;
-  uint64 server_max_seq = 3;
-  map<string, string> metadata = 4;
+  bool has_more = 3;
+  reserved 4 to 49;
+  map<string, string> ext = 50;
 }
 
 /// 会话详情请求：按 conversation_id 拉取
@@ -108,14 +101,26 @@ message GetConversationDetailResponse {
   map<string, string> metadata = 2;
 }
 
-/// 获取会话成员请求
-message GetConversationMembersRequest {
-  string conversation_id = 1;  // 会话 ID
+/// 分页获取会话参与者请求：用于群成员/通话候选人按需同步。
+message ListConversationParticipantsRequest {
+  string conversation_id = 1;
+  string cursor = 2;       // 当前实现为 offset 字符串；客户端按 opaque cursor 处理
+  int32 limit = 3;
+  bool include_removed = 4;
+  reserved 5 to 49;
+  map<string, string> ext = 50;
 }
 
-/// 获取会话成员响应
-message GetConversationMembersResponse {
-  repeated string member_ids = 1;  // 成员用户ID列表
+/// 分页获取会话参与者响应。
+message ListConversationParticipantsResponse {
+  string conversation_id = 1;
+  repeated flare.common.v1.ConversationParticipant participants = 2;
+  string next_cursor = 3;
+  bool has_more = 4;
+  uint64 participant_version = 5;  // conversation_participants.updated_at 最大毫秒时间
+  int32 member_count = 6;
+  reserved 7 to 49;
+  map<string, string> ext = 50;
 }
 
 // --- 会话写模型与公共结构（创建/更新返回、参与者、策略、设备、游标）---
@@ -126,7 +131,7 @@ message Conversation {
   flare.common.v1.ConversationType conversation_type = 2;  // 会话类型
   string business_type = 3;  // 业务类型
   map<string, string> attributes = 4;  // 扩展
-  repeated flare.common.v1.ConversationParticipant participants = 5;  // 参与者
+  repeated flare.common.v1.ConversationParticipant participants = 5;
   flare.common.v1.ConversationVisibility visibility = 6;  // 可见性
   flare.common.v1.ConversationLifecycleState lifecycle_state = 7;  // 生命周期
   google.protobuf.Timestamp created_at = 8;  // 创建时间
@@ -134,15 +139,6 @@ message Conversation {
   flare.common.v1.ConversationPolicy policy = 10;  // 策略
   /// 与库 conversations.channel_id 一致：单聊恒空；非单聊为消息 channel_id
   string channel_id = 11;
-}
-
-/// 会话参与者（本域请求/响应用；与 common.ConversationParticipant 字段兼容）
-message ConversationParticipant {
-  string user_id = 1;  // 用户 ID
-  repeated string roles = 2;  // 角色列表
-  bool muted = 3;  // 是否免打扰
-  bool pinned = 4;  // 是否置顶
-  map<string, string> attributes = 5;  // 扩展
 }
 
 /// 会话策略（冲突解决、设备数、匿名、历史同步等）
@@ -160,12 +156,6 @@ message DevicePresence {
   string device_platform = 2;  // 平台
   flare.common.v1.DeviceState state = 3;  // 状态
   google.protobuf.Timestamp last_seen_at = 4;  // 最后可见时间
-}
-
-/// 已读游标（单会话维度，用于批量已读）
-message AckCursor {
-  string conversation_id = 1;  // 会话 ID
-  int64 message_ts = 2;  // 已读到的消息时间戳
 }
 
 /// 参与者角色变更（管理参与者时用）
@@ -233,16 +223,16 @@ message SyncMessagesResponse {
   int64 server_cursor_ts = 3;  // 服务端游标时间戳
 }
 
-/// 更新游标请求（已读位置）
+/// 更新同步游标请求（非已读；普通已读必须使用 MarkConversationAsReadRequest.read_seq）
 message UpdateCursorRequest {
   reserved 1;
   reserved "user_id";
   string conversation_id = 2;  // 会话 ID
-  int64 message_ts = 3;  // 已读到的消息时间戳
+  int64 sync_seq = 3;  // 已同步到的会话序列
   string device_id = 5;  // 设备 ID
 }
 
-/// 标记会话已读请求（read_seq=0 时由服务端取 last_message_seq）
+/// 标记会话已读请求（read_seq 必须为明确的正数会话序列）
 message MarkConversationAsReadRequest {
   string conversation_id = 1;  // 会话 ID
   int64 read_seq = 2;  // 已读序号
@@ -274,7 +264,7 @@ message ForceConversationSyncRequest {
 message CreateConversationRequest {
   flare.common.v1.ConversationType conversation_type = 3;  // 会话类型
   string business_type = 4;  // 业务类型
-  repeated ConversationParticipant participants = 5;  // 初始参与者
+  repeated flare.common.v1.ConversationParticipant participants = 5;
   map<string, string> attributes = 6;  // 扩展
   flare.common.v1.ConversationVisibility visibility = 7;  // 可见性
   /// 落库 conversations.channel_id：单聊须空；群/频道等填消息 channel_id
@@ -300,6 +290,21 @@ message UpdateConversationResponse {
   Conversation conversation = 1;  // 更新后会话
 }
 
+/// 更新当前用户在某会话上的偏好（置顶/免打扰/归档/草稿）
+message UpdateConversationUserSettingsRequest {
+  string conversation_id = 1;
+  optional bool is_pinned = 2;
+  optional bool is_muted = 3;
+  optional bool is_archived = 4;
+  optional string draft = 5;
+  /// 客户端已知 settings_version；0 表示不校验
+  uint64 base_settings_version = 6;
+}
+
+message UpdateConversationUserSettingsResponse {
+  flare.common.v1.ConversationUserSettings settings = 1;
+}
+
 /// 删除会话请求（可选硬删）
 message DeleteConversationRequest {
   string conversation_id = 3;  // 会话 ID
@@ -309,20 +314,14 @@ message DeleteConversationRequest {
 /// 管理参与者请求（添加/移除/角色变更）
 message ManageParticipantsRequest {
   string conversation_id = 3;  // 会话 ID
-  repeated ConversationParticipant to_add = 4;  // 待添加
+  repeated flare.common.v1.ConversationParticipant to_add = 4;
   repeated string to_remove = 5;  // 待移除用户 ID
   repeated ParticipantRoleUpdate role_updates = 6;  // 角色变更
 }
 
 /// 管理参与者响应
 message ManageParticipantsResponse {
-  repeated ConversationParticipant participants = 1;  // 当前参与者
-}
-
-/// 批量确认已读请求（多会话游标）
-message BatchAcknowledgeRequest {
-  string user_id = 3;  // 用户 ID
-  repeated AckCursor cursors = 4;  // 各会话游标
+  repeated flare.common.v1.ConversationParticipant participants = 1;
 }
 
 /// 搜索会话请求（过滤 + 排序 + 分页）

@@ -6,6 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "errors.proto";
 import "metadata.proto";
+import "message.proto";
 
 // =============================================================================
 // MediaService（上传/分片/引用/访问/处理/ACL/桶）
@@ -376,6 +377,11 @@ message GetFileUrlRequest {
   int32 expires_in = 2;  // 有效期秒数，默认 3600
   bool download = 5;  // 是否下载
   map<string, string> response_headers = 6;  // 响应头
+  bool retention_protected = 9;  // 附件是否受 retention 策略保护
+  flare.common.v1.ContentVisibility content_visibility = 10;  // 服务端读模型中的内容可见性
+
+  reserved 7, 8;
+  reserved "burn_protected", "burn_status";
 }
 
 // 获取文件 URL 响应

@@ -15,8 +15,15 @@ service PushService {
   rpc PushMessage(PushMessageRequest) returns (PushMessageResponse);
   rpc PushNotification(PushNotificationRequest) returns (PushNotificationResponse);
   rpc PushCustom(PushCustomRequest) returns (PushCustomResponse);
+  rpc RegisterDevicePushToken(RegisterDevicePushTokenRequest) returns (RegisterDevicePushTokenResponse);
+  rpc UnregisterDevicePushToken(UnregisterDevicePushTokenRequest) returns (UnregisterDevicePushTokenResponse);
   // 可选：仅返回 proxy 侧记录的粗粒度状态（如 pending）；细粒度投递结果由业务或下游观测补齐
   rpc QueryPushStatus(QueryPushStatusRequest) returns (QueryPushStatusResponse);
+}
+
+enum DevicePushProvider {
+  DEVICE_PUSH_PROVIDER_UNSPECIFIED = 0;
+  DEVICE_PUSH_PROVIDER_GETUI = 1;
 }
 
 // 推送消息请求
@@ -67,6 +74,28 @@ message PushCustomResponse {
   repeated string failed_user_ids = 3;
   repeated PushFailure failures = 4;
   string task_id = 5;
+}
+
+message RegisterDevicePushTokenRequest {
+  string user_id = 1;
+  string device_id = 2;
+  string platform = 3;
+  DevicePushProvider provider = 4;
+  string token = 5;
+}
+
+message RegisterDevicePushTokenResponse {
+  bool success = 1;
+}
+
+message UnregisterDevicePushTokenRequest {
+  string user_id = 1;
+  string device_id = 2;
+  DevicePushProvider provider = 3;
+}
+
+message UnregisterDevicePushTokenResponse {
+  bool success = 1;
 }
 
 message PushOptions {
