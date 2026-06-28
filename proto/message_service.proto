@@ -199,8 +199,9 @@ message EditMessageResponse {
   bool success = 1;  // 是否编辑成功
   string error_message = 2;  // 失败时错误描述
   string message_id = 3;  // 消息 ID（与请求一致）
-  int32 edit_version = 4;  // 更新后编辑版本号
   google.protobuf.Timestamp edited_at = 5;  // 编辑时间
+  // 注：编辑版本号不在此同步响应返回——异步扇出架构下发布时无法权威分配；
+  // 客户端通过推送的编辑事件（按 conversation_seq 收敛）获得权威状态。
 }
 
 // 添加表情反应请求（与 ReactionEvent 对齐；user_id 由 metadata 注入）
@@ -213,7 +214,8 @@ message AddReactionRequest {
 message AddReactionResponse {
   bool success = 1;  // 是否成功
   string error_message = 2;  // 错误描述
-  int32 new_count = 3;  // 该表情当前数量
+  // 注：当前数量不在此同步响应返回——异步扇出架构下无法同步算出；
+  // 客户端通过推送的反应事件（按 conversation_seq/per-user 收敛）获得权威计数。
 }
 
 // 移除表情反应请求（user_id 由 metadata 注入）
@@ -226,7 +228,7 @@ message RemoveReactionRequest {
 message RemoveReactionResponse {
   bool success = 1;  // 是否成功
   string error_message = 2;  // 错误描述
-  int32 new_count = 3;  // 该表情当前数量
+  // 注：当前数量不在此同步响应返回（理由同 AddReactionResponse）。
 }
 
 // 回复/引用：通过 Message.quote（quoted_message_id 必填等）建新消息后 SendMessage。转发：用 ForwardContent 建新消息后 SendMessage。话题回复：attributes["thread_id"]；话题根：message_type=MESSAGE_TYPE_THREAD + content.thread。
