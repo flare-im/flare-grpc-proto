@@ -1,9 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // 与 `flare-proto` 同级：`../flare-proto/proto`（基础类型，include 放前面以优先解析同名 import）
-    let base_proto = manifest.join("..").join("flare-proto").join("proto");
+    let base_proto = flare_proto_include_dir(&manifest);
     let grpc_proto = manifest.join("proto");
 
     let mut protos = vec![
@@ -26,12 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={}", p.display());
     }
     println!("cargo:rerun-if-changed={}", base_proto.display());
+    println!("cargo:rerun-if-env-changed=PROTOC_INCLUDE");
 
     // 基础 proto 目录优先，避免与 `*_service.proto` 中的 `import "message.proto"` 等同名引用歧义
-    let includes = [
-        base_proto.to_string_lossy().to_string(),
-        grpc_proto.to_string_lossy().to_string(),
-    ];
+    let includes = proto_include_dirs(&base_proto, &grpc_proto);
 
     let mut config = tonic_prost_build::configure();
     config = config
@@ -111,4 +108,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     config.compile_protos(&proto_paths, &includes)?;
     Ok(())
+}
+
+fn flare_proto_include_dir(manifest: &Path) -> PathBuf {
+    std::env::var_os("DEP_FLARE_PROTO_PROTO_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| manifest.join("..").join("flare-proto").join("proto"))
+}
+
+fn proto_include_dirs(base_proto: &Path, grpc_proto: &Path) -> Vec<String> {
+    let mut includes = vec![
+        base_proto.to_string_lossy().to_string(),
+        grpc_proto.to_string_lossy().to_string(),
+    ];
+
+    for dir in well_known_proto_include_dirs() {
+        let dir = dir.to_string_lossy().to_string();
+        if !includes.iter().any(|existing| existing == &dir) {
+            includes.push(dir);
+        }
+    }
+
+    includes
+}
+
+fn well_known_proto_include_dirs() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(include_paths) = std::env::var_os("PROTOC_INCLUDE") {
+        candidates.extend(std::env::split_paths(&include_paths));
+    }
+
+    candidates.extend([
+        PathBuf::from("/usr/include"),
+        PathBuf::from("/usr/local/include"),
+        PathBuf::from("/opt/homebrew/include"),
+    ]);
+
+    candidates
+        .into_iter()
+        .filter(|dir| dir.join("google/protobuf/timestamp.proto").is_file())
+        .collect()
 }

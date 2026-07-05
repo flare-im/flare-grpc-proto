@@ -178,6 +178,12 @@ message ConversationBootstrapRequest {
   int32 recent_message_limit = 4;  // 最近消息条数
   string device_id = 5;  // 设备 ID
   string device_platform = 6;  // 平台
+  // 增量过滤（毫秒）：只返回 effective_updated_at > 该时刻的会话（0=全量）。
+  // 让热启/重连的列表同步在存储层就是 O(变化)，而非取全账号后在响应层丢弃。
+  int64 updated_after_ms = 7;
+  // 返回会话数上限：0=服务端默认（保守小值）；>0 受服务端硬上限钳制。
+  // 同步编排的快照分页传高值以覆盖 >默认上限 的大账号（分页在编排层完成）。
+  int32 max_conversations = 8;
 }
 
 /// 会话引导响应：摘要列表、最近消息、设备在线、游标、策略

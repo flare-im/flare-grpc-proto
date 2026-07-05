@@ -25,6 +25,8 @@ import "google/protobuf/timestamp.proto";
 service StorageReaderService {
   rpc QueryMessages(QueryMessagesRequest) returns (QueryMessagesResponse);  // 按时间查询
   rpc QueryMessagesBySeq(QueryMessagesBySeqRequest) returns (QueryMessagesBySeqResponse);  // 按序号查询
+  // 批量窗口查询：一次取多个会话各自最新 limit 条（冷启 bundle 每页 1 RPC 1 SQL，替代逐会话 N 次）
+  rpc QueryConversationsMessageWindows(QueryConversationsMessageWindowsRequest) returns (QueryConversationsMessageWindowsResponse);
   rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);  // 搜索
   rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);  // 单条获取
   rpc QueryMessageEvents(QueryMessageEventsRequest) returns (QueryMessageEventsResponse);  // 消息事件
@@ -114,6 +116,35 @@ message QueryMessagesBySeqResponse {
   string next_cursor = 2;  // 下一页游标
   bool has_more = 3;  // 是否还有更多
   int64 last_seq = 4;  // 最后序号
+}
+
+// 批量窗口目标；after_seq 仅在增量模式（newest_window=false）下生效
+message ConversationWindowTarget {
+  string conversation_id = 1;
+  int64 after_seq = 2;  // 增量模式：只取 seq > after_seq
+}
+
+// 批量窗口查询请求：一次取多个会话的消息窗口（冷启 bundle / 重连 catch-up 共用）。
+// newest_window=true：每会话取最新 limit 条（冷启首页）；false：每会话取
+// seq > after_seq 升序前 limit 条（增量 catch-up，与 QueryMessagesBySeq 语义一致）。
+message QueryConversationsMessageWindowsRequest {
+  repeated ConversationWindowTarget targets = 1;  // 目标会话（上限由服务端钳制）
+  int32 per_conversation_limit = 2;  // 每会话窗口条数
+  string user_id = 3;  // 可见性过滤视角
+  bool include_burned_placeholder = 4;  // 是否返回“该消息已销毁”占位
+  bool newest_window = 5;  // true=最新窗口；false=增量窗口
+}
+
+// 单会话消息窗口
+message ConversationMessageWindow {
+  string conversation_id = 1;
+  repeated flare.common.v1.Message messages = 2;  // seq 升序
+  int64 last_seq = 3;  // 窗口内最大 seq，空窗口=0
+}
+
+// 批量窗口查询响应
+message QueryConversationsMessageWindowsResponse {
+  repeated ConversationMessageWindow windows = 1;  // 与请求会话一一对应（空窗口也返回）
 }
 
 // 按会话顺序查询领域事件（seq 单调递增，与 sync.proto QueryEvents 对齐）

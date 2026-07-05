@@ -11,7 +11,9 @@ pub mod flare {
 
     pub mod signaling {
         pub mod online {
-            tonic::include_proto!("flare.signaling.online");
+            pub mod v1 {
+                tonic::include_proto!("flare.signaling.online.v1");
+            }
         }
         pub mod router {
             pub mod v1 {
@@ -74,12 +76,12 @@ pub mod flare {
 
 pub mod signaling {
     pub mod online {
-        pub use crate::flare::signaling::online::*;
+        pub use crate::flare::signaling::online::v1::*;
     }
     pub mod router {
         pub use crate::flare::signaling::router::v1::*;
     }
-    pub use crate::flare::signaling::online::*;
+    pub use crate::flare::signaling::online::v1::*;
 }
 
 pub mod push {
@@ -214,3 +216,39 @@ pub use conversation::{
     SyncMessagesResponse as ConversationSyncMessagesResponse, UpdateCursorRequest,
     UpdatePresenceRequest,
 };
+
+/// 「确保会话存在」的建群请求约定（唯一实现）：
+/// - `conversation_id` 经 `attributes["conversation_id"]` 携带——服务端按此 id 建群（幂等），
+///   与客户端 `hash(group_key)` 推导的会话 id 对齐；改动此约定必须三方（ingest 管线 /
+///   sync 编排 / conversation 消费端）同步，故收敛为单一构造函数。
+/// - 成员默认无角色/未静音/未置顶；可见性恒 Private。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn ensure_conversation_request(
+    conversation_id: &str,
+    conversation_type: i32,
+    business_type: String,
+    member_ids: impl IntoIterator<Item = String>,
+    channel_id: String,
+) -> conversation::CreateConversationRequest {
+    let participants = member_ids
+        .into_iter()
+        .map(|user_id| flare_proto::common::ConversationParticipant {
+            user_id,
+            roles: vec![],
+            muted: false,
+            pinned: false,
+            attributes: std::collections::HashMap::new(),
+            joined_at: 0,
+        })
+        .collect();
+    let mut attributes = std::collections::HashMap::new();
+    attributes.insert("conversation_id".to_string(), conversation_id.to_string());
+    conversation::CreateConversationRequest {
+        conversation_type,
+        business_type,
+        participants,
+        attributes,
+        visibility: 0, // SessionVisibility::Private
+        channel_id,
+    }
+}

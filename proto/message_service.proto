@@ -231,7 +231,7 @@ message RemoveReactionResponse {
   // 注：当前数量不在此同步响应返回（理由同 AddReactionResponse）。
 }
 
-// 回复/引用：通过 Message.quote（quoted_message_id 必填等）建新消息后 SendMessage。转发：用 ForwardContent 建新消息后 SendMessage。话题回复：attributes["thread_id"]；话题根：message_type=MESSAGE_TYPE_THREAD + content.thread。
+// 回复/引用：通过 Message.quote（quoted_message_id 必填等）建新消息后 SendMessage。转发：用 ForwardContent 建新消息后 SendMessage。话题回复：Message.thread_id + 普通消息内容；话题根：message_type=MESSAGE_TYPE_THREAD + content.thread。
 
 // ----------------------------------------------------------------------------
 // 置顶消息相关

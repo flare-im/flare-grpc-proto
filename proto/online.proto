@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package flare.signaling.online;
+package flare.signaling.online.v1;
 
-option go_package = "github.com/flare-labs/flare/proto/signaling/online;online";
+option go_package = "github.com/flare-labs/flare/proto/signaling/online/v1;onlinev1";
 
 import "google/protobuf/timestamp.proto";
 import "errors.proto";

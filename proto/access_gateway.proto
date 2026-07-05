@@ -77,6 +77,10 @@ service AccessGateway {
   // 推送自定义数据（common.CustomData，不占会话 seq、不落事件表）
   rpc PushCustom(PushCustomRequest) returns (PushResponse);
 
+  // 统一读扩散投递：按会话扇给"本网关节点订阅该会话的在线连接"，上游无需解析收件人。
+  // 上游（push-worker）对每条消息只发一次、广播到所有网关节点；各节点按本地订阅过滤（无订阅则空操作）。
+  rpc DeliverToConversation(DeliverToConversationRequest) returns (PushResponse);
+
   // 查询用户当前在线连接（设备/平台/连接质量等，供业务选端或展示）
   rpc GetUserConnections(GetUserConnectionsRequest) returns (GetUserConnectionsResponse);
 }
@@ -117,6 +121,35 @@ message PushCustomRequest {
   repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
   flare.common.v1.CustomData custom_data = 2;  // 与 common/data CustomData 一致
   PushOptions options = 3;
+}
+
+// 统一读扩散投递请求：按会话投递，无 user_ids（网关用本地会话订阅表解析在线连接）。
+// 载荷用 oneof 显式判别（替代早期"按字段空/非空推断"的暗约定）——三种路径互斥且穷尽。
+message DeliverToConversationRequest {
+  reserved 2, 4, 5, 6, 7;
+  string conversation_id = 1;  // 目标会话
+  PushOptions options = 3;     // 可选
+  oneof payload {
+    ConversationMessagesDelivery messages = 8;  // MessagePush 路径
+    ConversationEventsDelivery events = 9;      // EventEnvelope 路径（群消息/事件主路径）
+    ConversationWatermarkPing ping = 10;        // 纯水位通知（客户端按需补拉）
+  }
+}
+
+message ConversationMessagesDelivery {
+  repeated flare.common.v1.Message messages = 1;  // 必非空
+}
+
+message ConversationEventsDelivery {
+  repeated flare.common.v1.Event events = 1;  // 必非空；水位由网关从 events 推断（避免跨会话串扰）
+  flare.common.v1.EventEnvelopeDeliveryMode delivery_mode = 2;  // 为空则由网关按 events 推断
+  bool inline_events_truncated = 3;  // true 表示 events 非完整连续批，客户端按 seq 补拉
+}
+
+message ConversationWatermarkPing {
+  uint64 max_conversation_seq = 1;  // 必 >0：服务端当前水位
+  flare.common.v1.EventEnvelopeDeliveryMode delivery_mode = 2;
+  bool inline_events_truncated = 3;
 }
 
 // 统一推送响应：status 必填，成功时 result 为汇总，多用户时可选 user_results 明细
