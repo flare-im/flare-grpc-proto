@@ -11,8 +11,7 @@ homepage = "https://github.com/flare-im/flare-grpc-proto"
 documentation = "https://docs.rs/flare-grpc-proto"
 
 [dependencies]
-# 从本 crate 目录解析时，`../flare-proto` 在部分 Cargo 场景下会误解析到 workspace 上级；使用显式路径锚定到 `flare-im`。
-flare-proto = { version = "1.0.3", path = "../../flare-im/flare-proto" }
+flare-proto = "1.0.3"
 prost = "0.14"
 prost-types = "0.14"
 tonic = "0.14"
@@ -25,5 +24,5 @@ default = []
 sfu_control = []
 
 [build-dependencies]
-flare-proto = { version = "1.0.3", path = "../../flare-im/flare-proto" }
+flare-proto = "1.0.3"
 tonic-prost-build = "0.14"
