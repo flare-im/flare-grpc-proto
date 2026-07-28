@@ -186,9 +186,12 @@ message DeleteMessageResponse {
 
 // 编辑消息请求（与 MessageEditEvent 对齐；operator_id 由 metadata 注入）
 message EditMessageRequest {
+  // 3 = 原 edit_version：客户端恒发 0，服务端也不分配（见 MessageEditEvent）。
+  reserved 3;
+  reserved "edit_version";
+
   string message_id = 1;
   flare.common.v1.MessageContent new_content = 2;
-  int32 edit_version = 3;
   string reason = 4;
   bool show_edited_mark = 5;
   string conversation_id = 6;  // 可选；当服务端未配置 StorageReader 时由客户端提供，用于解析会话
