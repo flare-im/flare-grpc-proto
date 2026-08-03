@@ -2,6 +2,11 @@
 //!
 //! 依赖 [`flare_proto`](flare_proto) 中的 `flare.common.v1` 等基础类型；业务 crate 按需依赖本 crate。
 
+// 本 crate 内容全部由 prost/tonic 从 .proto 生成，代码风格不由我们控制。
+// large_enum_variant 针对 oneof 生成枚举的变体大小差异 —— 这是 protobuf 固有形态，
+// 真要收敛得改 .proto 的消息设计，而不是在生成代码里加 Box。
+#![allow(clippy::large_enum_variant)]
+
 pub mod flare {
     pub mod access_gateway {
         pub mod v1 {
