@@ -1,55 +1,63 @@
 # flare-grpc-proto
 
-> ## ℹ️ 这是通信基础设施，不是开箱即用的 IM 产品
+English · [中文](README.zh-CN.md)
+
+> ## ℹ️ This is communication infrastructure, not a ready-to-use IM product
 >
-> 说在前面，免得你 clone 完才发现登不上去：**开源部分不含账号体系**
-> （没有注册登录、好友关系、群角色/审批/禁言、朋友圈）。
+> Up front, so you don't clone it only to find you can't log in: **the
+> open-source part does not include an account system** (no sign-up/login,
+> no friend relationships, no group roles/approval/muting, no moments feed).
 >
-> 但它自带完整且可插拔的鉴权契约，两条路都在开源侧：
+> But it ships with a complete, pluggable authentication contract, and both
+> paths live on the open-source side:
 >
-> - **`CoreJwtTokenValidator`** —— 本地验 JWT。手签一个 token 就能跑起来做
->   demo / POC，**不需要任何用户体系**。
-> - **`HttpHookTokenValidator`** —— 把 token POST 到你自己的接口，
->   **这是接入自有用户体系的入口**。
+> - **`CoreJwtTokenValidator`** — validates JWTs locally. Hand-sign a token
+>   and you can get it running for a demo / POC, **with no user system at all**.
+> - **`HttpHookTokenValidator`** — POSTs the token to your own endpoint;
+>   **this is the entry point for integrating your own user system**.
 >
-> 业务规则同理：`flare-im-core/crates/flare-im-hooks` 提供 9 个扩展点
-> （PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction /
-> ConversationLifecycle / ConversationMember / GetConversationParticipants）。
+> Business rules work the same way: `flare-im-core/crates/flare-im-hooks`
+> provides 9 extension points (PreSend / PostSend / Delivery / Recall /
+> MessageRead / MessageReaction / ConversationLifecycle / ConversationMember /
+> GetConversationParticipants).
 >
-> 要上生产，你需要自行实现用户体系并按上述契约接入 —— 与 Sendbird /
-> Twilio Conversations 的「自带身份」模型一致，区别是 Flare 可自托管、
-> 协议与核心可审计。
+> To go to production, you implement your own user system and wire it in via
+> the contracts above — the same "bring your own identity" model as Sendbird /
+> Twilio Conversations, except Flare can be self-hosted and its protocol and
+> core are auditable.
 >
-> 边界详情见 [GOVERNANCE.md](GOVERNANCE.md)。
+> See [GOVERNANCE.md](GOVERNANCE.md) for the boundary details.
 
 
-Flare IM 的 **gRPC 服务层 Protocol Buffers** 与 **Rust 生成代码**（`tonic` + `prost`）。业务服务 crate 通过依赖本库获得各服务的 client / server 类型及消息定义。
+The **gRPC service-layer Protocol Buffers** and **Rust generated code**
+(`tonic` + `prost`) for Flare IM. Business service crates depend on this
+library to obtain each service's client / server types and message definitions.
 
-## 职责边界
+## Responsibility boundary
 
-| 组件 | 说明 |
+| Component | Description |
 |------|------|
-| **`flare-proto`** | 域模型与公共类型（如 `flare.common.v1`、消息体 `Message` 等） |
-| **本 crate** | 各 gRPC 服务的 `.proto` 与编译产物；通过 `extern_path` 引用 `flare_proto` 中的公共包，避免重复生成 |
+| **`flare-proto`** | Domain models and common types (such as `flare.common.v1`, the `Message` body, etc.) |
+| **This crate** | The `.proto` files and compiled artifacts for each gRPC service; references the common packages in `flare_proto` via `extern_path` to avoid duplicate generation |
 
-## 目录结构
+## Directory structure
 
 ```
 flare-grpc-proto/
-├── proto/           # 服务定义（*.proto）
-├── build.rs         # tonic-prost-build 编译入口
-├── src/lib.rs       # include_proto! 与便捷 re-export
+├── proto/           # Service definitions (*.proto)
+├── build.rs         # tonic-prost-build compilation entry point
+├── src/lib.rs       # include_proto! and convenience re-exports
 ├── Cargo.toml
 └── README.md
 ```
 
-## 本仓库中的服务 Proto
+## Service Protos in this repository
 
-`build.rs` 当前编译的文件（顺序与依赖解析相关）：
+The files currently compiled by `build.rs` (order matters for dependency resolution):
 
 - `access_gateway.proto`
 - `conversation_service.proto`
-- `capability_service.proto`（包名 `flare.capability.v1`：`CapabilityService`、`HookExtension`、`HookService`）
+- `capability_service.proto` (package `flare.capability.v1`: `CapabilityService`, `HookExtension`, `HookService`)
 - `media_service.proto`
 - `message_service.proto`
 - `online.proto`
@@ -59,71 +67,77 @@ flare-grpc-proto/
 - `sync_service.proto`
 - `sfu_control.proto`
 
-基础类型的 `import` 由 **`flare-proto/proto`** 提供；编译时 include 路径为「基础目录优先，再本目录」，以减少同名 import 歧义。
+The `import` statements for base types are provided by **`flare-proto/proto`**;
+at compile time the include path is "base directory first, then this directory",
+to reduce ambiguity over identically named imports.
 
-## 依赖
+## Dependencies
 
-- **Rust**：见根目录 `Cargo.toml` 中 `rust-version`（当前为 **1.94+**，Edition **2024**）。
-- **crate**：`flare-proto`、`prost`、`tonic`、`serde` 等，详见 `Cargo.toml`。
+- **Rust**: see `rust-version` in the root `Cargo.toml` (currently **1.94+**, Edition **2024**).
+- **crates**: `flare-proto`, `prost`, `tonic`, `serde`, and others — see `Cargo.toml` for details.
 
-> `flare-proto` 的 path 以 **`Cargo.toml`** 为准；在不同工作区布局下可能使用相对路径锚定。
+> The path to `flare-proto` is authoritatively defined in **`Cargo.toml`**; it may use a relative path anchor under different workspace layouts.
 
-## 构建
+## Build
 
 ```bash
 cargo build -p flare-grpc-proto
 ```
 
-修改任意 `proto/*.proto` 或 `flare-proto/proto` 下被引用的文件后，重新构建即可触发 `build.rs` 重新生成代码。
+After modifying any `proto/*.proto` or any referenced file under `flare-proto/proto`, rebuilding will trigger `build.rs` to regenerate the code.
 
-## 使用方式
+## Usage
 
-在其它 crate 的 `Cargo.toml` 中：
+In another crate's `Cargo.toml`:
 
 ```toml
 flare-grpc-proto = { path = "../flare-grpc-proto" }
 ```
 
-按需引用模块，例如：
+Reference modules as needed, for example:
 
 ```rust
-use flare_grpc_proto::message;      // flare.message.v1 服务类型
-use flare_grpc_proto::conversation; // 会话服务（非 wasm 时部分符号可用）
-use flare_grpc_proto::Message;      // 从 flare_proto 再导出的公共消息类型
+use flare_grpc_proto::message;      // flare.message.v1 service types
+use flare_grpc_proto::conversation; // Conversation service (some symbols available in non-wasm builds)
+use flare_grpc_proto::Message;      // The common message type re-exported from flare_proto
 ```
 
-具体路径以 `src/lib.rs` 中的 `pub mod` 与 `pub use` 为准。
+The exact paths are authoritatively defined by the `pub mod` and `pub use` in `src/lib.rs`.
 
-## 生成选项说明
+## Generation options
 
-- **Client / Server**：均在 `build.rs` 中开启（`build_client(true)`, `build_server(true)`）。
-- **Well-known types**：`compile_well_known_types(false)`，与 `flare-proto` 策略对齐。
-- **Serde**：部分 `flare.media.v1` 请求/响应在 `build.rs` 中附加 `Serialize` / `Deserialize`，便于 HTTP 网关等场景。
+- **Client / Server**: both enabled in `build.rs` (`build_client(true)`, `build_server(true)`).
+- **Well-known types**: `compile_well_known_types(false)`, aligned with the `flare-proto` strategy.
+- **Serde**: some `flare.media.v1` requests/responses have `Serialize` / `Deserialize` attached in `build.rs`, to facilitate scenarios such as HTTP gateways.
 
-## 许可
+## License
 
-MIT（见 `Cargo.toml`）。
+MIT (see `Cargo.toml`).
 
 ---
 
-## 下一步
+## Next steps
 
-| 想做什么 | 去哪里 |
+| What you want to do | Where to go |
 |---|---|
-| **五分钟跑起来** | [QUICKSTART](https://github.com/flare-im/flare-im-core-server/blob/main/QUICKSTART.md) —— 起服务、手签 token、调通接口，**不需要自建用户体系** |
-| 接入自己的用户系统 | 实现 `TokenValidator`（`CoreJwtTokenValidator` 本地验签 / `HttpHookTokenValidator` 调你的接口） |
-| 加自己的业务规则 | `flare-im-hooks` 的 9 个扩展点：PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction / ConversationLifecycle / ConversationMember / GetConversationParticipants |
-| 做界面 | [`@flare-im/vue-ui`](https://www.npmjs.com/package/@flare-im/vue-ui) —— 107 个组件，四端一致的契约 |
-| 报安全问题 | [SECURITY.md](SECURITY.md)，**请勿开公开 issue** |
+| **Get it running in five minutes** | [QUICKSTART](https://github.com/flare-im/flare-im-core-server/blob/main/QUICKSTART.md) — start the services, hand-sign a token, and call the APIs, **without building your own user system** |
+| Integrate your own user system | Implement `TokenValidator` (`CoreJwtTokenValidator` for local signature verification / `HttpHookTokenValidator` to call your own endpoint) |
+| Add your own business rules | The 9 extension points of `flare-im-hooks`: PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction / ConversationLifecycle / ConversationMember / GetConversationParticipants |
+| Build a UI | [`@flare-im/vue-ui`](https://www.npmjs.com/package/@flare-im/vue-ui) — 107 components, with a contract consistent across four platforms |
+| Report a security issue | [SECURITY.md](SECURITY.md), **please do not open a public issue** |
 
-## 需要账号体系与社交能力时
+## When you need an account system and social features
 
-开源部分是**通信基础设施**。如果你需要的是现成的账号、好友关系、群治理（角色 / 入群审批 / 禁言）、朋友圈，
-这些在商业模块里 —— 自研这一层通常要数月，且都是与通信无关的重复劳动。
+The open-source part is **communication infrastructure**. If what you need is a
+ready-made account system, friend relationships, group governance (roles /
+join approval / muting), or a moments feed, those live in the commercial modules
+— building this layer yourself typically takes months, and it is all repetitive
+work unrelated to communication.
 
-企业场景另有 SSO / 组织架构 / 审计导出 / 数据驻留 / SLA 支持。
+Enterprise scenarios additionally have SSO / org structure / audit export /
+data residency / SLA support.
 
-咨询：`flare1522@163.com`
+Inquiries: `flare1522@163.com`
 
-> 边界划分与不变承诺见 [GOVERNANCE](https://github.com/flare-im/flare-im-core-server/blob/main/GOVERNANCE.md)。
-> 简言之：**已开源的不会被收回，鉴权与 hooks 契约永远开源、不会为逼迫付费而阉割。**
+> For the boundary split and the immutable commitments, see [GOVERNANCE](https://github.com/flare-im/flare-im-core-server/blob/main/GOVERNANCE.md).
+> In short: **what has been open-sourced will not be taken back, and the authentication and hooks contracts will always remain open-source and will never be crippled to force payment.**
