@@ -244,6 +244,8 @@ pub fn ensure_conversation_request(
             pinned: false,
             attributes: std::collections::HashMap::new(),
             joined_at: 0,
+            // 建群时的初始成员无历史下限：他们本来就在场，没有「入群前」可言。
+            visible_from_seq: 0,
         })
         .collect();
     let mut attributes = std::collections::HashMap::new();
