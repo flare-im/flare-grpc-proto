@@ -305,6 +305,8 @@ message UpdateConversationUserSettingsRequest {
   optional string draft = 5;
   /// 客户端已知 settings_version；0 表示不校验
   uint64 base_settings_version = 6;
+  /// 只接收提到我的消息；与 is_muted 正交
+  optional bool is_mention_only = 7;
 }
 
 message UpdateConversationUserSettingsResponse {
