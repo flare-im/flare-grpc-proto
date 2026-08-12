@@ -9,7 +9,10 @@ Cargo.lock
 *.swp
 *.swo
 *~
-.cargo/
+# `.cargo/` 整体忽略会让 cargo 配置与审计豁免（.cargo/audit.toml）被静默丢掉，
+# 只忽略真正属于本地的凭据文件。
+.cargo/credentials
+.cargo/credentials.toml
 platforms/
 
 # OS
