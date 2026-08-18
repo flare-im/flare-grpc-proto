@@ -203,6 +203,17 @@ message RegisterPluginEndpointRequest {
   // 留空 = 未声明 = 沿用旧行为（不强制），但会被标记为 unverified —— 
   // 不这么设计的话，老插件会在升级瞬间全部失效。
   repeated string declared_operations = 10;
+
+  // 计费/授权单位："tenant" | "per_user"。
+  //
+  // - `tenant`：**装了就全员可用**。租户开关即安装状态，没装即拒，不需要逐人发放。
+  //   绝大多数插件属于这一类（朋友圈、审批、工单）——组织装了大家就用。
+  // - `per_user`：还需逐人授权。留给两类：有边际成本的（AI 按 token 烧钱，
+  //   按席位卖才不亏）与需合规隔离的（DLP 导出只给特定角色）。
+  //
+  // 留空 = 未声明 = **沿用旧语义**（要求用户授权）。这样现有插件行为一字不变，
+  // 迁移是按插件自愿的，不存在「升级当天全员被拒」那种反转。
+  string seat_model = 11;
 }
 
 message RegisterPluginEndpointResponse {
@@ -241,6 +252,8 @@ message RegisteredPluginInstance {
   // 显式留一个字段而不是靠 declared_operations 是否为空来推断 —— 
   // 将来「声明了但为空」与「压根没声明」会是两种语义。
   bool unverified = 9;
+  // 计费/授权单位，语义同 RegisterPluginEndpointRequest.seat_model。
+  string seat_model = 10;
 }
 
 message ListRegisteredPluginsResponse {
