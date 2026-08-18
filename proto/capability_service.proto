@@ -178,6 +178,31 @@ message RegisterPluginEndpointRequest {
   string grpc_authority = 4;
   map<string, string> labels = 5;
   string request_id = 6;
+
+  // ---- 注册契约 v2：以下字段全部可选，旧插件不带即为「未声明」 ----
+  //
+  // 为什么必须可选：注册契约是插件与核心之间的**长期契约**，一旦要求必填，
+  // 所有已部署的插件在核心升级的瞬间全部注册失败。可选 + 未声明降级，
+  // 才能让新旧插件在同一个集群里共存，这是兼容窗口成立的前提。
+
+  // 插件自身版本（语义化版本），用于兼容窗口、灰度与回滚。
+  // 缺失时无法做版本决策，只能按「未知版本」对待。
+  string plugin_version = 7;
+
+  // 插件面向的插件 API 版本。核心据此判断能否加载，
+  // 而不是等调用时才发现契约对不上。
+  string api_version = 8;
+
+  // 插件清单（plugin.json）的 sha256。核心据此确认**部署的插件与目录里那份是同一个**。
+  // 没有它，目录只是一份说明文档，无法作为可信来源。
+  string manifest_sha256 = 9;
+
+  // 本插件声明能处理的 operation 全集。
+  //
+  // 这条是「声明即边界」的载体：声明之外的调用一律拒绝。
+  // 留空 = 未声明 = 沿用旧行为（不强制），但会被标记为 unverified —— 
+  // 不这么设计的话，老插件会在升级瞬间全部失效。
+  repeated string declared_operations = 10;
 }
 
 message RegisterPluginEndpointResponse {
@@ -206,6 +231,16 @@ message RegisteredPluginInstance {
   string capability_id = 2;
   string grpc_authority = 3;
   map<string, string> labels = 4;
+
+  // ---- 注册契约 v2 的留存值，语义同 RegisterPluginEndpointRequest ----
+  string plugin_version = 5;
+  string api_version = 6;
+  string manifest_sha256 = 7;
+  repeated string declared_operations = 8;
+  // 未携带 declared_operations 的插件为 unverified：能用，但声明边界无法强制。
+  // 显式留一个字段而不是靠 declared_operations 是否为空来推断 —— 
+  // 将来「声明了但为空」与「压根没声明」会是两种语义。
+  bool unverified = 9;
 }
 
 message ListRegisteredPluginsResponse {
