@@ -83,7 +83,8 @@ cargo build -p flare-grpc-proto
 在其它 crate 的 `Cargo.toml` 中：
 
 ```toml
-flare-grpc-proto = { path = "../flare-grpc-proto" }
+[dependencies]
+flare-grpc-proto = "2.2"
 ```
 
 按需引用模块，例如：
@@ -104,7 +105,7 @@ use flare_grpc_proto::Message;      // 从 flare_proto 再导出的公共消息�
 
 ## 许可
 
-MIT（见 `Cargo.toml`）。
+依据 [Apache License 2.0](LICENSE) 授权。
 
 ---
 

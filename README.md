@@ -91,7 +91,8 @@ After modifying any `proto/*.proto` or any referenced file under `flare-proto/pr
 In another crate's `Cargo.toml`:
 
 ```toml
-flare-grpc-proto = { path = "../flare-grpc-proto" }
+[dependencies]
+flare-grpc-proto = "2.2"
 ```
 
 Reference modules as needed, for example:
@@ -112,7 +113,7 @@ The exact paths are authoritatively defined by the `pub mod` and `pub use` in `s
 
 ## License
 
-MIT (see `Cargo.toml`).
+Licensed under the [Apache License 2.0](LICENSE).
 
 ---
 
