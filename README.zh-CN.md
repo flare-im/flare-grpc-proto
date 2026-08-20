@@ -36,7 +36,7 @@ Flare IM 的 **gRPC 服务层 Protocol Buffers** 与 **Rust 生成代码**（`to
 
 ## 目录结构
 
-```
+```text
 flare-grpc-proto/
 ├── proto/           # 服务定义（*.proto）
 ├── build.rs         # tonic-prost-build 编译入口

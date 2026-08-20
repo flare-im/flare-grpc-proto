@@ -42,7 +42,7 @@ library to obtain each service's client / server types and message definitions.
 
 ## Directory structure
 
-```
+```text
 flare-grpc-proto/
 ├── proto/           # Service definitions (*.proto)
 ├── build.rs         # tonic-prost-build compilation entry point
