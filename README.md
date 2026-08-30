@@ -26,7 +26,7 @@ English · [中文](README.zh-CN.md)
 > Twilio Conversations, except Flare can be self-hosted and its protocol and
 > core are auditable.
 >
-> See [GOVERNANCE.md](GOVERNANCE.md) for the boundary details.
+> See [GOVERNANCE.md](.github/GOVERNANCE.md) for the boundary details.
 
 
 The **gRPC service-layer Protocol Buffers** and **Rust generated code**
@@ -125,7 +125,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 | Integrate your own user system | Implement `TokenValidator` (`CoreJwtTokenValidator` for local signature verification / `HttpHookTokenValidator` to call your own endpoint) |
 | Add your own business rules | The 9 extension points of `flare-im-hooks`: PreSend / PostSend / Delivery / Recall / MessageRead / MessageReaction / ConversationLifecycle / ConversationMember / GetConversationParticipants |
 | Build a UI | [`@flare-im/vue-ui`](https://www.npmjs.com/package/@flare-im/vue-ui) — 107 components, with a contract consistent across four platforms |
-| Report a security issue | [SECURITY.md](SECURITY.md), **please do not open a public issue** |
+| Report a security issue | [SECURITY.md](.github/SECURITY.md), **please do not open a public issue** |
 
 ## When you need an account system and social features
 
