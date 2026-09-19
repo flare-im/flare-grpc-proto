@@ -83,6 +83,20 @@ service AccessGateway {
 
   // 查询用户当前在线连接（设备/平台/连接质量等，供业务选端或展示）
   rpc GetUserConnections(GetUserConnectionsRequest) returns (GetUserConnectionsResponse);
+
+  // 轻量信令跨节点直转：把一条已编码的 RealtimeControl DATA 帧发给**本节点**订阅该会话的在线连接。
+  // 不落库、不占 seq、不动水位、不 ACK；丢失可接受、最新覆盖旧。
+  //
+  // 上游是**另一个网关节点**——收到上行信令并完成聚合的那一个。它按服务发现广播给其余节点，
+  // 各节点按本地订阅过滤（无订阅则空操作）。不复用 DeliverToConversation：那条路的载荷是
+  // messages/events/watermark，都是有 seq、会推进水位的东西，而这里的帧两样都没有。
+  rpc RelayRealtimeControl(RelayRealtimeControlRequest) returns (PushResponse);
+}
+
+// 跨节点直转一条轻量信令（typing 聚合包、presence 提示等）。
+message RelayRealtimeControlRequest {
+  string conversation_id = 1;  // 目标会话；空则丢弃
+  bytes packet = 2;            // 已编码的 flare.common.v1.DataPacket（payload = realtime_control）
 }
 
 // ----------------------------------------------------------------------------
