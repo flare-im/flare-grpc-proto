@@ -51,6 +51,12 @@ pub mod flare {
         }
     }
 
+    pub mod control {
+        pub mod v1 {
+            tonic::include_proto!("flare.control.v1");
+        }
+    }
+
     pub mod conversation {
         pub mod v1 {
             tonic::include_proto!("flare.conversation.v1");
@@ -119,6 +125,11 @@ pub mod access_gateway {
 
 pub mod sync {
     pub use crate::flare::sync::v1::*;
+}
+
+/// 控制面投影协议（`control_plane.proto` → `flare.control.v1`）。
+pub mod control {
+    pub use crate::flare::control::v1::*;
 }
 
 /// SFU 插件控制面（`sfu_control.proto` → `flare.sfu.control.v1`）。需启用 crate feature `sfu_control`。

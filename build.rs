@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut protos = vec![
         grpc_proto.join("access_gateway.proto"),
+        grpc_proto.join("control_plane.proto"),
         grpc_proto.join("conversation_service.proto"),
         grpc_proto.join("capability_service.proto"),
         grpc_proto.join("media_service.proto"),
@@ -93,6 +94,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".flare.media.v1.DescribeBucketResponse",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         );
+
+    // 控制面 outbox 以 JSON 存投影载荷,整个包派生 serde
+    config = config.type_attribute(
+        ".flare.control.v1",
+        "#[derive(serde::Serialize, serde::Deserialize)]",
+    );
 
     if std::env::var("CARGO_FEATURE_SFU_CONTROL").is_ok() {
         config = config.type_attribute(

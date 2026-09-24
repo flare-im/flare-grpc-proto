@@ -3,6 +3,15 @@
 本文件只记录**已发布到 crates.io 的版本**。版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 2.3.0 — 未发布
+
+### 新增
+
+- `control_plane.proto`(`flare.control.v1`):控制面 → 数据面的租户/功能开关投影协议
+  `TenantProjection { UpsertTenant, UpsertFeatureFlags, GetVersions }`。真源在控制面
+  (flare-im-console),Social 与核各实现一份接收端,按 `version` 幂等。整包派生 serde。
+- `OnlineService.KickTenant`:按租户踢出全部连接(租户停用时由控制面调用)。
+
 ## 2.1.0 — 未发布
 
 ### 新增

@@ -29,6 +29,7 @@ service OnlineService {
   rpc SubscribeUserPresence(SubscribeUserPresenceRequest) returns (stream UserPresenceEvent);  // 订阅用户状态流
   rpc ListUserDevices(ListUserDevicesRequest) returns (ListUserDevicesResponse);  // 用户设备列表
   rpc KickDevice(KickDeviceRequest) returns (KickDeviceResponse);  // 踢出设备
+  rpc KickTenant(KickTenantRequest) returns (KickTenantResponse);  // 踢出整个租户的全部连接(按 tenant:sessions 索引分页)
   rpc GetDevice(GetDeviceRequest) returns (GetDeviceResponse);  // 查询设备
 }
 
@@ -219,6 +220,17 @@ message KickDeviceRequest {
 // 踢出设备响应
 message KickDeviceResponse {
   bool success = 1;  // 是否成功
+}
+
+// 踢出租户请求:租户停用时由控制面调用;在线服务按 tenant:sessions:{tenant} 索引分页踢出
+message KickTenantRequest {
+  string tenant_id = 1;  // 数据面租户 ID
+  string reason = 2;     // 踢出原因,原样下发给连接端
+}
+
+// 踢出租户响应
+message KickTenantResponse {
+  uint32 kicked = 1;     // 本次实际踢出的 (user, device) 数
 }
 
 // 查询设备请求

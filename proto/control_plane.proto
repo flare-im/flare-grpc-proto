@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package flare.control.v1;
+
+option go_package = "github.com/flare-labs/flare/proto/control/v1;controlv1";
+
+// =============================================================================
+// TenantProjection(控制面 → 数据面的租户/开关投影)
+// =============================================================================
+// 真源在控制面(flare-im-console)。数据面(flare-social 的 flare-social-control、
+// flare-im-core 的 capability 进程)各实现一份本服务,只负责把投影落到本地表并按
+// version 幂等:收到的 version 小于等于本地已有版本即丢弃并返回当前版本。
+//
+// 核只有能力开关(CapabilityService.SetTenantCapabilitySwitch),不消费功能开关投影:
+// 核对 UpsertFeatureFlags 返回 UNIMPLEMENTED。
+//
+// im_tenant_id 是数据面通用的租户 ID(默认租户 "0");控制面自身的租户主键不出现在
+// 本协议里。`*` 只用于功能开关的平台级默认行,租户投影不允许 `*`。
+
+service TenantProjection {
+  rpc UpsertTenant(TenantProjectionUpsert) returns (ProjectionAck);
+  rpc UpsertFeatureFlags(FeatureFlagsProjectionUpsert) returns (ProjectionAck);
+  rpc GetVersions(GetVersionsRequest) returns (ProjectionVersions);
+}
+
+// ----------------------------------------------------------------------------
+// 租户投影
+// ----------------------------------------------------------------------------
+
+enum TenantStatus {
+  TENANT_STATUS_UNSPECIFIED = 0;
+  TENANT_STATUS_ACTIVE = 1;
+  TENANT_STATUS_SUSPENDED = 2;  // 拒新连、拒重连、拒登录/refresh/签 IM token;数据不删
+  TENANT_STATUS_DELETING = 3;   // 等价 SUSPENDED + 后台清理中
+}
+
+// 核侧执行的运行时配额;0 = 不限,回落全局配置
+message CoreQuota {
+  uint32 send_qps = 1;
+  uint32 sync_pull_qps = 2;
+  uint32 max_online_devices_per_user = 3;
+}
+
+// 0 = 不限
+message TenantQuota {
+  uint32 max_users = 1;
+  uint32 max_groups = 2;
+  uint32 max_group_members = 3;
+  CoreQuota core = 4;
+}
+
+message TenantProjectionUpsert {
+  string im_tenant_id = 1;
+  string name = 2;
+  TenantStatus status = 3;
+  TenantQuota quota = 4;
+  bytes settings_json = 5;  // 品牌/locale 等非开关设置;Social 只透传给公开 /features 快照
+  uint64 version = 6;       // 控制面全局单调序列
+}
+
+// ----------------------------------------------------------------------------
+// 功能开关投影(整租户快照,接收端整租户替换)
+// ----------------------------------------------------------------------------
+
+message FeatureFlagRow {
+  string key = 1;             // 开关注册表里的 key,如 "invite.mode"
+  bool enabled = 2;           // 总闸;false 时 rules 不评估
+  bytes config_json = 3;      // 行级 config(JSON 对象)
+  bytes rules_json = 4;       // 有序规则数组(JSON),见 features.registry 文档;空 = 无规则
+  int64 effective_from_ms = 5;   // 0 = 无下界
+  int64 effective_until_ms = 6;  // 0 = 无上界
+}
+
+message FeatureUserOverride {
+  string key = 1;
+  string user_id = 2;
+  bool enabled = 3;
+  bytes config_json = 4;     // 空 = 沿用行级/默认 config
+  int64 expires_at_ms = 5;   // 0 = 不过期
+}
+
+message FeatureFlagsProjectionUpsert {
+  string im_tenant_id = 1;   // "*" = 平台默认
+  repeated FeatureFlagRow flags = 2;
+  repeated FeatureUserOverride overrides = 3;
+  uint64 version = 4;
+}
+
+// ----------------------------------------------------------------------------
+// 通用
+// ----------------------------------------------------------------------------
+
+message ProjectionAck {
+  bool accepted = 1;           // false = 因版本过旧被忽略
+  uint64 current_version = 2;  // 接收端当前持有的版本
+}
+
+message GetVersionsRequest {
+  repeated string im_tenant_ids = 1;  // 空 = 全部
+}
+
+message TenantVersions {
+  uint64 tenant_version = 1;    // 0 = 未投影
+  uint64 features_version = 2;  // 0 = 未投影 / 接收端不支持
+}
+
+message ProjectionVersions {
+  map<string, TenantVersions> versions = 1;  // key = im_tenant_id
+}
