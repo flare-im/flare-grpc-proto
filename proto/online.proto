@@ -28,7 +28,8 @@ service OnlineService {
   rpc BatchGetUserPresence(BatchGetUserPresenceRequest) returns (BatchGetUserPresenceResponse);  // 批量在线状态
   rpc SubscribeUserPresence(SubscribeUserPresenceRequest) returns (stream UserPresenceEvent);  // 订阅用户状态流
   rpc ListUserDevices(ListUserDevicesRequest) returns (ListUserDevicesResponse);  // 用户设备列表
-  rpc KickDevice(KickDeviceRequest) returns (KickDeviceResponse);  // 踢出设备
+  rpc KickDevice(KickDeviceRequest) returns (KickDeviceResponse);  // Console 管理员踢设备（control token）
+  rpc SelfKickDevice(KickDeviceRequest) returns (KickDeviceResponse);  // 用户仅踢自己当前租户的设备（signed User context）
   rpc KickTenant(KickTenantRequest) returns (KickTenantResponse);  // 踢出整个租户的全部连接(按 tenant:sessions 索引分页)
   rpc GetDevice(GetDeviceRequest) returns (GetDeviceResponse);  // 查询设备
 }
