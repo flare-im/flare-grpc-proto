@@ -11,6 +11,11 @@
   `TenantProjection { UpsertTenant, UpsertFeatureFlags, GetVersions }`。真源在控制面
   (flare-im-console),Social 与核各实现一份接收端,按 `version` 幂等。整包派生 serde。
 - `OnlineService.KickTenant`:按租户踢出全部连接(租户停用时由控制面调用)。
+- `ConversationManageService.PurgeConversationHistory`:物理删除会话里服务端时间早于
+  `before_ms` 的消息、事件、置顶与标记,会话、成员与边界之后的消息保留,重复调用幂等。
+  用于「重新加好友时只丢弃旧关系的历史」——整会话硬删会连同接受之后已经发出的消息一起删掉。
+  新增 RPC 与消息,不改动已有字段;老服务端对它返回 UNIMPLEMENTED,调用方据此重试而不是
+  退回整会话硬删。
 
 ## 2.1.0 — 未发布
 

@@ -39,6 +39,7 @@ service ConversationManageService {
   rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);  // 创建会话
   rpc UpdateConversation(UpdateConversationRequest) returns (UpdateConversationResponse);  // 更新会话
   rpc DeleteConversation(DeleteConversationRequest) returns (google.protobuf.Empty);  // 删除会话
+  rpc PurgeConversationHistory(PurgeConversationHistoryRequest) returns (PurgeConversationHistoryResponse);  // 按时间边界硬删历史，保留会话与此后的消息
   rpc ManageParticipants(ManageParticipantsRequest) returns (ManageParticipantsResponse);  // 管理参与者
   rpc SearchConversations(SearchConversationsRequest) returns (SearchConversationsResponse);  // 搜索会话
   rpc UpdateCursor(UpdateCursorRequest) returns (google.protobuf.Empty);  // 更新同步游标
@@ -317,6 +318,25 @@ message UpdateConversationUserSettingsResponse {
 message DeleteConversationRequest {
   string conversation_id = 3;  // 会话 ID
   bool hard_delete = 4;  // 是否硬删
+}
+
+/// 按时间边界硬删会话历史的请求
+///
+/// 物理删除 `before_ms` 之前写入的消息、事件、置顶与标记；会话行、成员以及
+/// `before_ms` 及之后的消息全部保留。与 `DeleteConversation(hard_delete=true)`
+/// 的区别在于边界之后到达的消息不受影响，适合「关系重建时丢弃旧历史」这类
+/// 边界由业务事件决定、且新消息可能已先于清理写入的场景。重复调用幂等。
+message PurgeConversationHistoryRequest {
+  string conversation_id = 1;  // 会话 ID
+  /// 服务端时间（Unix 毫秒），与 Message.created_at 同一时钟域（由 ingest 盖章）。
+  /// 只删除 created_at 严格早于它的消息与事件；必须为正，0 或负值返回 INVALID_ARGUMENT。
+  int64 before_ms = 2;
+}
+
+/// 按时间边界硬删会话历史的响应
+message PurgeConversationHistoryResponse {
+  uint64 purged_messages = 1;  // 本次删除的消息条数（重放时为 0）
+  uint64 max_purged_seq = 2;  // 被删消息中最大的会话 seq；没删任何消息时为 0
 }
 
 /// 管理参与者请求（添加/移除/角色变更）
