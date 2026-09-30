@@ -9,6 +9,7 @@ import "metadata.proto";
 import "message.proto";
 import "conversation.proto";
 import "conversation_service.proto";
+import "control_plane.proto";
 
 // =============================================================================
 // gRPC 服务（置顶：先见 API 面，再读 message / enum）
@@ -33,6 +34,15 @@ service HookPlugin {
 
 service ExtensionPlugin {
   rpc Call(GenericRequest) returns (GenericResponse);
+}
+
+// 管理员只读（Console → admin-gateway → Capability）。authorization 携带 admin-gateway 原样转发的
+// admin 令牌（aud=flare-core-admin、token_use=admin、员工主体、具体租户）；租户只取自令牌，请求不带
+// tenant_id。数据只来自本进程持有的投影与开关表，网关不需要数据库角色。
+// 单独成服务：已有 CapabilityService 实现不需要跟着改。
+service CapabilityAdminService {
+  rpc ListTenantCapabilitySwitches(ListTenantCapabilitySwitchesRequest) returns (ListTenantCapabilitySwitchesResponse);
+  rpc GetTenantRuntime(GetTenantRuntimeRequest) returns (GetTenantRuntimeResponse);
 }
 
 // ----------------------------------------------------------------------------
@@ -258,6 +268,40 @@ message RegisteredPluginInstance {
 
 message ListRegisteredPluginsResponse {
   repeated RegisteredPluginInstance instances = 1;
+}
+
+// ----------------------------------------------------------------------------
+// CapabilityAdminService — 管理员只读
+// ----------------------------------------------------------------------------
+
+// 租户取自 admin 令牌
+message ListTenantCapabilitySwitchesRequest {}
+
+message TenantCapabilitySwitch {
+  string capability_id = 1;
+  bool enabled = 2;  // false = 装过但停用；未出现在列表里 = 从未设置
+  google.protobuf.Timestamp updated_at = 3;
+}
+
+message ListTenantCapabilitySwitchesResponse {
+  string tenant_id = 1;  // 令牌租户（规范形式）
+  repeated TenantCapabilitySwitch switches = 2;  // 按 capability_id 升序
+}
+
+// 租户取自 admin 令牌
+message GetTenantRuntimeRequest {}
+
+// 本进程持有的租户投影（控制面经 TenantProjection 推送）。projected=false 时除 tenant_id 外均为零值。
+message GetTenantRuntimeResponse {
+  string tenant_id = 1;  // 令牌租户（规范形式）
+  bool projected = 2;  // 本地 tenants 表是否有该租户的行（含 version=0 的预置行）
+  string name = 3;
+  flare.control.v1.TenantStatus status = 4;
+  flare.control.v1.TenantQuota quota = 5;  // 0 = 不限
+  string settings_json = 6;  // 控制面透传的设置（JSON 对象文本），核不解释
+  uint64 version = 7;  // 本地持有的投影版本；0 = 预置行，未收到过投影
+  google.protobuf.Timestamp projected_at = 8;  // 最近一次接受投影的时间；未投影过为空
+  google.protobuf.Timestamp updated_at = 9;
 }
 
 // ----------------------------------------------------------------------------

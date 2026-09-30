@@ -16,6 +16,16 @@
   用于「重新加好友时只丢弃旧关系的历史」——整会话硬删会连同接受之后已经发出的消息一起删掉。
   新增 RPC 与消息,不改动已有字段;老服务端对它返回 UNIMPLEMENTED,调用方据此重试而不是
   退回整会话硬删。
+- 三个管理员只读服务,供 admin-gateway 以原样转发的 admin 令牌调用,租户只取自令牌:
+  - `ConversationAdminService { AdminListConversations, AdminGetConversation, AdminListParticipants }`:
+    按租户分页列会话(游标编码 `updated_at` + `conversation_id`,不接收 `user_id`)、
+    读会话详情、分页读成员;
+  - `OnlineAdminService { AdminListUserDevices, AdminGetUserPresence }`;
+  - `CapabilityAdminService { ListTenantCapabilitySwitches, GetTenantRuntime }`:
+    `capability_service.proto` 为此引入 `control_plane.proto`,复用 `TenantStatus` 与 `TenantQuota`。
+
+  都是新服务,没有往已有服务里加方法:已有的 `OnlineService`、`CapabilityService`、
+  会话读写服务实现不需要改动就能继续编译。
 
 ## 2.1.0 — 未发布
 

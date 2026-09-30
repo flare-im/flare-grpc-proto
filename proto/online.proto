@@ -34,6 +34,15 @@ service OnlineService {
   rpc GetDevice(GetDeviceRequest) returns (GetDeviceResponse);  // 查询设备
 }
 
+// OnlineAdminService：管理员只读入口（Console → admin-gateway → Online）。
+// authorization 携带 admin-gateway 原样转发的 admin 令牌（aud=flare-core-admin、token_use=admin、
+// 员工主体、具体租户）；租户只取自已验证的令牌，请求体不带 tenant_id。
+// 单独成服务而不是往 OnlineService 里加方法：已有 OnlineService 实现不需要跟着改。
+service OnlineAdminService {
+  rpc AdminListUserDevices(AdminListUserDevicesRequest) returns (ListUserDevicesResponse);  // 令牌租户下某用户的在线设备
+  rpc AdminGetUserPresence(AdminGetUserPresenceRequest) returns (GetUserPresenceResponse);  // 令牌租户下某用户的在线状态
+}
+
 // ----------------------------------------------------------------------------
 // 枚举
 // ----------------------------------------------------------------------------
@@ -243,4 +252,18 @@ message GetDeviceRequest {
 // 查询设备响应
 message GetDeviceResponse {
   DeviceInfo device = 1;  // 设备信息
+}
+
+// ----------------------------------------------------------------------------
+// 管理员只读（OnlineAdminService）
+// ----------------------------------------------------------------------------
+
+// 管理员查询用户设备请求：租户取自 admin 令牌
+message AdminListUserDevicesRequest {
+  string user_id = 1;  // 用户 ID
+}
+
+// 管理员查询用户在线状态请求：租户取自 admin 令牌
+message AdminGetUserPresenceRequest {
+  string user_id = 1;  // 用户 ID
 }

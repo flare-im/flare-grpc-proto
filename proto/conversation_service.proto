@@ -58,6 +58,16 @@ service ThreadService {
   rpc DeleteThread(DeleteThreadRequest) returns (DeleteThreadResponse);  // 删除子话题
 }
 
+/// ConversationAdminService：管理员只读（Console → admin-gateway → Conversation）。
+/// authorization 携带 admin-gateway 原样转发的 admin 令牌（aud=flare-core-admin、token_use=admin、
+/// 员工主体、具体租户）。租户只取自已验证的令牌，请求不带 tenant_id 与 user_id；
+/// 读取不要求调用者是会话成员。单独成服务，已有读/写服务的实现不受影响。
+service ConversationAdminService {
+  rpc AdminListConversations(AdminListConversationsRequest) returns (AdminListConversationsResponse);  // 令牌租户下的会话，按 updated_at 倒序分页
+  rpc AdminGetConversation(AdminGetConversationRequest) returns (AdminGetConversationResponse);  // 会话详情（不含成员列表）
+  rpc AdminListParticipants(AdminListParticipantsRequest) returns (AdminListParticipantsResponse);  // 分页读取会话成员
+}
+
 // ----------------------------------------------------------------------------
 // 枚举与公共模型
 // ----------------------------------------------------------------------------
@@ -450,4 +460,51 @@ message DeleteThreadRequest {
 /// 删除子话题响应
 message DeleteThreadResponse {
   bool success = 1;  // 是否成功
+}
+
+// ----------------------------------------------------------------------------
+// ConversationAdminService：管理员只读 请求与响应
+// ----------------------------------------------------------------------------
+
+/// 按租户分页列会话（租户取自 admin 令牌）
+message AdminListConversationsRequest {
+  /// 不透明游标，编码上一页最后一行的 (updated_at, conversation_id)；空 = 首页。
+  /// 翻页期间被更新的会话会移到前面，可能漏读或重读，管理视图可接受。
+  string cursor = 1;
+  int32 limit = 2;  // 每页条数：0 = 默认 50，上限 200
+  bool include_deleted = 3;  // 是否包含 lifecycle_state=deleted 的会话
+}
+
+/// 按租户分页列会话响应
+message AdminListConversationsResponse {
+  repeated flare.common.v1.ConversationDetail conversations = 1;  // member_count 为当前有效成员数
+  string next_cursor = 2;  // 下一页游标；has_more=false 时为空
+  bool has_more = 3;  // 是否还有更多
+}
+
+/// 管理员读取会话详情
+message AdminGetConversationRequest {
+  string conversation_id = 1;  // 会话 ID
+}
+
+/// 管理员读取会话详情响应；会话不存在或不属于令牌租户返回 NOT_FOUND
+message AdminGetConversationResponse {
+  flare.common.v1.ConversationDetail detail = 1;  // 不含成员列表，成员走 AdminListParticipants
+}
+
+/// 管理员分页读取会话成员
+message AdminListParticipantsRequest {
+  string conversation_id = 1;  // 会话 ID
+  string cursor = 2;  // 不透明游标；空 = 首页
+  int32 limit = 3;  // 每页条数：0 = 默认 200，上限 500
+  bool include_removed = 4;  // 是否包含已退出/已删除的成员
+}
+
+/// 管理员分页读取会话成员响应；会话不存在或不属于令牌租户返回 NOT_FOUND
+message AdminListParticipantsResponse {
+  string conversation_id = 1;  // 会话 ID
+  repeated flare.common.v1.ConversationParticipant participants = 2;
+  string next_cursor = 3;  // 下一页游标；has_more=false 时为空
+  bool has_more = 4;  // 是否还有更多
+  int32 member_count = 5;  // 与 include_removed 同口径的成员总数，只在首页计算，后续页沿用
 }
