@@ -336,11 +336,24 @@ message DeleteConversationRequest {
 /// `before_ms` 及之后的消息全部保留。与 `DeleteConversation(hard_delete=true)`
 /// 的区别在于边界之后到达的消息不受影响，适合「关系重建时丢弃旧历史」这类
 /// 边界由业务事件决定、且新消息可能已先于清理写入的场景。重复调用幂等。
+///
+/// 纪元围栏（`before_epoch > 0`）：消息 attributes 里 `epoch_attribute` 的值是非负整数时，
+/// 只按它判定——严格小于 `before_epoch` 才删，与 created_at 无关，不依赖任何时钟；
+/// 没有该属性（或值不是非负整数）的消息回落到 `before_ms` 时间边界。纪元由业务方在
+/// PreSend 放行时写进消息 attributes（例如 Social 的好友纪元）。此时事件不再按时间删：
+/// 只删被删消息所在 seq 上的事件，以及 seq 小于剩余最早消息的非消息事件（会话里不剩
+/// 消息时为全部非消息事件）。老服务端忽略这两个字段，按 `before_ms` 时间边界执行。
 message PurgeConversationHistoryRequest {
   string conversation_id = 1;  // 会话 ID
   /// 服务端时间（Unix 毫秒），与 Message.created_at 同一时钟域（由 ingest 盖章）。
   /// 只删除 created_at 严格早于它的消息与事件；必须为正，0 或负值返回 INVALID_ARGUMENT。
+  /// 纪元围栏下只作用于没有纪元属性的消息，可以为 0（这类消息一条不删），负值仍返回
+  /// INVALID_ARGUMENT。
   int64 before_ms = 2;
+  /// 纪元属性名（消息 attributes 的键）。`before_epoch > 0` 时必填，否则必须为空。
+  string epoch_attribute = 3;
+  /// 纪元围栏：0 表示不按纪元清除（只按 `before_ms`）；负值返回 INVALID_ARGUMENT。
+  int64 before_epoch = 4;
 }
 
 /// 按时间边界硬删会话历史的响应

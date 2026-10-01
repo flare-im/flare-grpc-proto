@@ -16,6 +16,9 @@
   用于「重新加好友时只丢弃旧关系的历史」——整会话硬删会连同接受之后已经发出的消息一起删掉。
   新增 RPC 与消息,不改动已有字段;老服务端对它返回 UNIMPLEMENTED,调用方据此重试而不是
   退回整会话硬删。
+  `PurgeConversationHistoryRequest` 另有 `epoch_attribute`(3)与 `before_epoch`(4):
+  按消息 attributes 里的纪元清除,带纪元的消息只看纪元、不看时间,没有纪元的消息回落到
+  `before_ms`;纪元围栏下 `before_ms` 可以为 0。老服务端忽略这两个字段,按时间边界执行。
 - 三个管理员只读服务,供 admin-gateway 以原样转发的 admin 令牌调用,租户只取自令牌:
   - `ConversationAdminService { AdminListConversations, AdminGetConversation, AdminListParticipants }`:
     按租户分页列会话(游标编码 `updated_at` + `conversation_id`,不接收 `user_id`)、
