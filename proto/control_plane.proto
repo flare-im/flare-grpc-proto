@@ -20,6 +20,7 @@ option go_package = "github.com/flare-labs/flare/proto/control/v1;controlv1";
 service TenantProjection {
   rpc UpsertTenant(TenantProjectionUpsert) returns (ProjectionAck);
   rpc UpsertFeatureFlags(FeatureFlagsProjectionUpsert) returns (ProjectionAck);
+  rpc UpsertCredentials(CredentialsProjectionUpsert) returns (ProjectionAck);
   rpc GetVersions(GetVersionsRequest) returns (ProjectionVersions);
 }
 
@@ -87,7 +88,7 @@ message FeatureFlagsProjectionUpsert {
 }
 
 // ----------------------------------------------------------------------------
-// 应用凭证投影的快照契约（传输 RPC 与接收器随后接入，尚未开放入口）
+// 应用凭证投影（仅受认证 ProjectionWorker 可写，本地落盘，不回查 Control）
 // ----------------------------------------------------------------------------
 enum ApiKeyMode {
   API_KEY_MODE_UNSPECIFIED = 0; // 必须拒绝，不能当作 live
@@ -136,6 +137,7 @@ message GetVersionsRequest {
 message TenantVersions {
   uint64 tenant_version = 1;    // 0 = 未投影
   uint64 features_version = 2;  // 0 = 未投影 / 接收端不支持
+  uint64 credentials_version = 3; // 空凭证快照也保留版本水位
 }
 
 message ProjectionVersions {
