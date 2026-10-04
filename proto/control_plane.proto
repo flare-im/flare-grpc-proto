@@ -7,7 +7,7 @@ option go_package = "github.com/flare-labs/flare/proto/control/v1;controlv1";
 // =============================================================================
 // TenantProjection(控制面 → 数据面的租户/开关投影)
 // =============================================================================
-// 真源在控制面(flare-im-console)。数据面(flare-social 的 flare-social-control、
+// 真源在控制面(flare-social/platform/control)。数据面(flare-social 的 flare-social-control、
 // flare-im-core 的 capability 进程)各实现一份本服务,只负责把投影落到本地表并按
 // version 幂等:收到的 version 小于等于本地已有版本即丢弃并返回当前版本。
 //
@@ -84,6 +84,40 @@ message FeatureFlagsProjectionUpsert {
   repeated FeatureFlagRow flags = 2;
   repeated FeatureUserOverride overrides = 3;
   uint64 version = 4;
+}
+
+// ----------------------------------------------------------------------------
+// 应用凭证投影的快照契约（传输 RPC 与接收器随后接入，尚未开放入口）
+// ----------------------------------------------------------------------------
+enum ApiKeyMode {
+  API_KEY_MODE_UNSPECIFIED = 0; // 必须拒绝，不能当作 live
+  API_KEY_MODE_LIVE = 1;
+  API_KEY_MODE_TEST = 2;
+}
+
+message CredentialKey {
+  string key_id = 1;             // 12位大写RFC4648 base32，不是明文token
+  string service_account_id = 2;
+  ApiKeyMode mode = 3;
+  bytes hash = 4;                // 正好32字节 SHA256(raw pepper || raw secret)
+  bytes pepper_fingerprint = 5;  // 正好32字节 SHA256(raw pepper)，不是pepper
+  repeated string scopes = 6;    // 显式端点作用域，无通配，最多16个
+  int64 expires_at_ms = 7;       // 0=无到期；负数必须拒绝，无刷新宽限
+  repeated string ip_allow = 8;  // canonical CIDR，最多32项
+  bool revoked = 9;              // 接收器必须拒绝撤销Key
+  bool service_account_enabled = 10; // 缺字段=false，fail closed
+}
+
+// 全应用快照，事务中原子替换并保留版本水位；空keys是合法的全部撤销。
+// 控制面通常仅投递仍可能使用的Key；缺失Key必须拒绝，不回查Control或旧凭据。
+// app_id是永久运行租户映射，不是Organization主键，也不是假Environment。
+// 接收器必须验证签名worker、精确app租户范围、非零单调版本、绑定、重复key_id、
+// mode、材料长度、作用域和CIDR；默认最大1024项。旧/同版本不改变数据。
+// 不得将此消息或其Debug输出到普通日志；没有token、secret或pepper字段。
+message CredentialsProjectionUpsert {
+  string app_id = 1;
+  uint64 version = 2;
+  repeated CredentialKey keys = 3;
 }
 
 // ----------------------------------------------------------------------------
