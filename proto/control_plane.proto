@@ -21,6 +21,10 @@ service TenantProjection {
   rpc UpsertTenant(TenantProjectionUpsert) returns (ProjectionAck);
   rpc UpsertFeatureFlags(FeatureFlagsProjectionUpsert) returns (ProjectionAck);
   rpc UpsertCredentials(CredentialsProjectionUpsert) returns (ProjectionAck);
+  // 平台级角色权限包(员工角色 → 权限码、已吊销会话 jti、员工会话验签公钥集)。
+  // 只有 Social 投影接收端实现(供统一网关 admin 分区本地授权);核返回 UNIMPLEMENTED。
+  // 令牌租户范围必须是 `*`;整份替换,按 version 幂等。
+  rpc UpsertRoleBundle(RoleBundleProjectionUpsert) returns (ProjectionAck);
   rpc GetVersions(GetVersionsRequest) returns (ProjectionVersions);
 }
 
@@ -57,6 +61,9 @@ message TenantProjectionUpsert {
   TenantQuota quota = 4;
   bytes settings_json = 5;  // 品牌/locale 等非开关设置;Social 只透传给公开 /features 快照
   uint64 version = 6;       // 控制面全局单调序列
+  // 拥有该应用的控制面组织 id(纯数字,最长 20 字节);统一网关据此校验员工会话的组织作用域。
+  // 数据面不解释它,也不以它做任何业务路由;缺省为空。
+  string organization_id = 7;
 }
 
 // ----------------------------------------------------------------------------
@@ -122,6 +129,27 @@ message CredentialsProjectionUpsert {
 }
 
 // ----------------------------------------------------------------------------
+// 角色权限包投影(平台级,整份快照)
+// ----------------------------------------------------------------------------
+// 真源是控制面 IAM。统一网关 admin 分区用它把员工会话里的角色展开成权限码集合、拒绝已吊销
+// 的会话、并用 iam_public_keys_jwks 本地验签员工会话,不回查控制面(不变量:数据面不依赖
+// 控制面在线)。
+message RoleGrant {
+  string role_id = 1;             // 控制面角色主键;平台虚拟角色为 "platform:super_admin"
+  string scope_type = 2;          // "platform" | "org"
+  string scope_id = 3;            // scope_type=org 时为组织 id;platform 为空
+  string code = 4;                // 角色码,如 im_admin / im_operator / super_admin
+  repeated string permissions = 5; // 权限码集合,去重、升序;最多 1024 个
+}
+
+message RoleBundleProjectionUpsert {
+  uint64 version = 1;                      // 控制面全局单调序列
+  repeated RoleGrant roles = 2;            // 最多 4096 条
+  repeated string revoked_session_jti = 3; // 已吊销但未过期的员工会话 jti;最多 4096 条
+  bytes iam_public_keys_jwks = 4;          // JWKS(JSON 对象,{"keys":[{kty:"OKP",crv:"Ed25519",kid,x}]}),≤ 64 KiB
+}
+
+// ----------------------------------------------------------------------------
 // 通用
 // ----------------------------------------------------------------------------
 
@@ -138,6 +166,7 @@ message TenantVersions {
   uint64 tenant_version = 1;    // 0 = 未投影
   uint64 features_version = 2;  // 0 = 未投影 / 接收端不支持
   uint64 credentials_version = 3; // 空凭证快照也保留版本水位
+  uint64 role_bundle_version = 4; // 只在 key = "*" 的条目上有意义;其余为 0
 }
 
 message ProjectionVersions {
