@@ -235,12 +235,14 @@ message KickDeviceResponse {
 // 踢出租户请求:租户停用时由控制面调用;在线服务按 tenant:sessions:{tenant} 索引分页踢出
 message KickTenantRequest {
   string tenant_id = 1;  // 数据面租户 ID
-  string reason = 2;     // 踢出原因,原样下发给连接端
+  string reason = 2;     // 运维说明；客户端收到类型化 TENANT_UNAVAILABLE，不透传此文本。
+  optional uint64 expected_tenant_version = 3; // 自动停用必须指定精确投影版本；缺失仅用于授权员工主动踢人。
 }
 
 // 踢出租户响应
 message KickTenantResponse {
   uint32 kicked = 1;     // 本次实际踢出的 (user, device) 数
+  bool superseded = 2;   // 已激活/版本不匹配；无会话副作用。不是踢人成功或 socket ACK。
 }
 
 // 查询设备请求
