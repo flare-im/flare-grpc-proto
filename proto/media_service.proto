@@ -111,8 +111,8 @@ message MediaReferenceInfo {
 
 // 访问控制条目
 message AccessControlEntry {
-  string principal = 1;  // 主体（user/role/tenant）
-  repeated string permissions = 2;  // 权限（read/write/delete/manage）
+  string principal = 1;  // Explicit application User: user:<id>; no role/tenant wildcard.
+  repeated string permissions = 2;  // Exactly [read]; no write/delete/manage grant.
 }
 
 // ----------------------------------------------------------------------------
