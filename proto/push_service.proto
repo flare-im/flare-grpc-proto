@@ -16,7 +16,8 @@ service PushService {
   rpc PushNotification(PushNotificationRequest) returns (PushNotificationResponse);
   rpc PushCustom(PushCustomRequest) returns (PushCustomResponse);
   rpc RegisterDevicePushToken(RegisterDevicePushTokenRequest) returns (RegisterDevicePushTokenResponse);
-  rpc UnregisterDevicePushToken(UnregisterDevicePushTokenRequest) returns (UnregisterDevicePushTokenResponse);
+  rpc InspectDevicePushBinding(InspectDevicePushBindingRequest) returns (InspectDevicePushBindingResponse);
+  rpc RevokeDevicePushBinding(RevokeDevicePushBindingRequest) returns (RevokeDevicePushBindingResponse);
   // 可选：仅返回 proxy 侧记录的粗粒度状态（如 pending）；细粒度投递结果由业务或下游观测补齐
   rpc QueryPushStatus(QueryPushStatusRequest) returns (QueryPushStatusResponse);
 }
@@ -84,19 +85,33 @@ message RegisterDevicePushTokenRequest {
   string platform = 3;
   DevicePushProvider provider = 4;
   string token = 5;
+  // SHA-256 of a client-held revoke-only capability. Never the capability itself.
+  string binding_id = 6;
+  string expected_version = 7;
+  int64 expires_at_ms = 8;
 }
 
 message RegisterDevicePushTokenResponse {
   bool success = 1;
+  string binding_id = 2;
 }
 
-message UnregisterDevicePushTokenRequest {
+message InspectDevicePushBindingRequest {
   string user_id = 1;
   string device_id = 2;
   DevicePushProvider provider = 3;
+  string binding_id = 4;
 }
-
-message UnregisterDevicePushTokenResponse {
+message InspectDevicePushBindingResponse {
+  string version = 1;
+  string current_binding_id = 2;
+  // absent, active, revoked or notCurrent; never another user's identity/token.
+  string state = 3;
+}
+message RevokeDevicePushBindingRequest {
+  string revocation_token = 1;
+}
+message RevokeDevicePushBindingResponse {
   bool success = 1;
 }
 

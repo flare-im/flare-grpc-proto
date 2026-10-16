@@ -181,7 +181,8 @@ pub use push::{
     PushNotificationRequest as PushPushNotificationRequest,
     PushNotificationResponse as PushPushNotificationResponse, PushOptions, QueryPushStatusRequest,
     QueryPushStatusResponse, RegisterDevicePushTokenRequest, RegisterDevicePushTokenResponse,
-    UnregisterDevicePushTokenRequest, UnregisterDevicePushTokenResponse,
+    InspectDevicePushBindingRequest, InspectDevicePushBindingResponse,
+    RevokeDevicePushBindingRequest, RevokeDevicePushBindingResponse,
 };
 
 pub use storage::{
