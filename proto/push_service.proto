@@ -24,6 +24,8 @@ service PushService {
 enum DevicePushProvider {
   DEVICE_PUSH_PROVIDER_UNSPECIFIED = 0;
   DEVICE_PUSH_PROVIDER_GETUI = 1;
+  DEVICE_PUSH_PROVIDER_FCM = 2;
+  DEVICE_PUSH_PROVIDER_APNS = 3;
 }
 
 // 推送消息请求
