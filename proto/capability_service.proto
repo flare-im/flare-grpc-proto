@@ -36,6 +36,18 @@ service ExtensionPlugin {
   rpc Call(GenericRequest) returns (GenericResponse);
 }
 
+// Plugin callbacks use the dedicated invocation ticket, never a user/Cell token.
+// Hosted on the existing Capability listener; not a new gateway or service process.
+service PluginHostBridge {
+  rpc Call(GenericRequest) returns (GenericResponse);
+}
+
+// Trusted internal backend (Core -> Social). Requires a Cell-signed User context.
+// This is deliberately distinct from the plugin-facing bridge audience.
+service PluginResourceBackend {
+  rpc Call(GenericRequest) returns (GenericResponse);
+}
+
 // 管理员只读（Console → admin-gateway → Capability）。authorization 携带 admin-gateway 原样转发的
 // admin 令牌（aud=flare-core-admin、token_use=admin、员工主体、具体租户）；租户只取自令牌，请求不带
 // tenant_id。数据只来自本进程持有的投影与开关表，网关不需要数据库角色。
@@ -189,14 +201,9 @@ message RegisterPluginEndpointRequest {
   map<string, string> labels = 5;
   string request_id = 6;
 
-  // ---- 注册契约 v2：以下字段全部可选，旧插件不带即为「未声明」 ----
-  //
-  // 为什么必须可选：注册契约是插件与核心之间的**长期契约**，一旦要求必填，
-  // 所有已部署的插件在核心升级的瞬间全部注册失败。可选 + 未声明降级，
-  // 才能让新旧插件在同一个集群里共存，这是兼容窗口成立的前提。
+  // 注册声明字段由服务端校验必填。声明校验不等于发布者签名或租户审批。
 
   // 插件自身版本（语义化版本），用于兼容窗口、灰度与回滚。
-  // 缺失时无法做版本决策，只能按「未知版本」对待。
   string plugin_version = 7;
 
   // 插件面向的插件 API 版本。核心据此判断能否加载，
@@ -210,20 +217,11 @@ message RegisterPluginEndpointRequest {
   // 本插件声明能处理的 operation 全集。
   //
   // 这条是「声明即边界」的载体：声明之外的调用一律拒绝。
-  // 留空 = 未声明 = 沿用旧行为（不强制），但会被标记为 unverified —— 
-  // 不这么设计的话，老插件会在升级瞬间全部失效。
+  // 留空、重复或包含未声明入口时拒绝注册。
   repeated string declared_operations = 10;
 
-  // 计费/授权单位："tenant" | "per_user"。
-  //
-  // - `tenant`：**装了就全员可用**。租户开关即安装状态，没装即拒，不需要逐人发放。
-  //   绝大多数插件属于这一类（朋友圈、审批、工单）——组织装了大家就用。
-  // - `per_user`：还需逐人授权。留给两类：有边际成本的（AI 按 token 烧钱，
-  //   按席位卖才不亏）与需合规隔离的（DLP 导出只给特定角色）。
-  //
-  // 留空 = 未声明 = **沿用旧语义**（要求用户授权）。这样现有插件行为一字不变，
-  // 迁移是按插件自愿的，不存在「升级当天全员被拒」那种反转。
-  string seat_model = 11;
+  reserved 11;
+  reserved "seat_model";
 }
 
 message RegisterPluginEndpointResponse {
@@ -258,12 +256,10 @@ message RegisteredPluginInstance {
   string api_version = 6;
   string manifest_sha256 = 7;
   repeated string declared_operations = 8;
-  // 未携带 declared_operations 的插件为 unverified：能用，但声明边界无法强制。
-  // 显式留一个字段而不是靠 declared_operations 是否为空来推断 —— 
-  // 将来「声明了但为空」与「压根没声明」会是两种语义。
+  // 未验证实例仅用于诊断展示，禁止接收业务调用。
   bool unverified = 9;
-  // 计费/授权单位，语义同 RegisterPluginEndpointRequest.seat_model。
-  string seat_model = 10;
+  reserved 10;
+  reserved "seat_model";
 }
 
 message ListRegisteredPluginsResponse {
@@ -1034,4 +1030,42 @@ message QueryHookExecutionsRequest {
 message QueryHookExecutionsResponse {
   repeated HookExecution executions = 1;  // 执行列表
   flare.common.v1.Pagination pagination = 2;
+}
+
+// Shared plugin process control. Implemented by the plugin host on its existing
+// gRPC listener; not another gateway/control microservice. Inspect is public
+// metadata only. ApplyTenant requires a short platform-worker control assertion
+// whose audience binds the deployment and whose tenant binds app_id.
+service PluginRuntime {
+  rpc Inspect(PluginRuntimeInspectRequest) returns (PluginRuntimeInspectResponse);
+  rpc ApplyTenant(PluginTenantState) returns (PluginTenantStateAck);
+}
+message PluginRuntimeInspectRequest {}
+message PluginRuntimeInspectResponse {
+  string deployment_id = 1;
+  string plugin_id = 2;
+  string plugin_version = 3;
+  string manifest_digest = 4;
+  string artifact_digest = 5;
+  bool ready = 6;
+  bool draining = 7;
+}
+message PluginTenantState {
+  string deployment_id = 1;
+  string app_id = 2;
+  string grant_id = 3;
+  uint64 revision = 4;
+  string manifest_digest = 5;
+  bytes configuration_json = 6;
+  string configuration_digest = 7;
+  bool enabled = 8;
+  int64 valid_until_ms = 9;
+  // Normal preparation validates plugin configuration before installation ACK.
+  // An authenticated emergency deny may bypass business validation, never enable.
+  bool validate_configuration = 10;
+}
+message PluginTenantStateAck {
+  uint64 revision = 1;
+  string configuration_digest = 2;
+  bool enabled = 3;
 }
