@@ -21,6 +21,9 @@ service TenantProjection {
   rpc UpsertTenant(TenantProjectionUpsert) returns (ProjectionAck);
   rpc UpsertFeatureFlags(FeatureFlagsProjectionUpsert) returns (ProjectionAck);
   rpc UpsertCredentials(CredentialsProjectionUpsert) returns (ProjectionAck);
+  // Authenticated full app plugin snapshot; Core persists it locally. Market
+  // queries and unsigned endpoint registration never create runtime grants.
+  rpc UpsertPlugins(PluginsProjectionUpsert) returns (ProjectionAck);
   // 平台级角色权限包(员工角色 → 权限码、已吊销会话 jti、员工会话验签公钥集)。
   // 只有 Social 投影接收端实现(供统一网关 admin 分区本地授权);核返回 UNIMPLEMENTED。
   // 令牌租户范围必须是 `*`;整份替换,按 version 幂等。
@@ -128,6 +131,15 @@ message CredentialsProjectionUpsert {
   repeated CredentialKey keys = 3;
 }
 
+// JSON is the canonical flare-plugin-protocol PluginRuntimeSnapshot. Receivers
+// enforce the exact app/version binding, 2 MiB bound, lease, manifest digests,
+// deployment bindings and permission subsets before an atomic replacement.
+message PluginsProjectionUpsert {
+  string app_id = 1;
+  uint64 version = 2;
+  bytes snapshot_json = 3;
+}
+
 // ----------------------------------------------------------------------------
 // 角色权限包投影(平台级,整份快照)
 // ----------------------------------------------------------------------------
@@ -167,6 +179,7 @@ message TenantVersions {
   uint64 features_version = 2;  // 0 = 未投影 / 接收端不支持
   uint64 credentials_version = 3; // 空凭证快照也保留版本水位
   uint64 role_bundle_version = 4; // 只在 key = "*" 的条目上有意义;其余为 0
+  uint64 plugins_version = 5;
 }
 
 message ProjectionVersions {
