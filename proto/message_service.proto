@@ -66,7 +66,7 @@ service MessageActionService {
 message SendMessageRequest {
   string conversation_id = 1;  // 会话 ID，格式 {conversation_type}:{id}
   flare.common.v1.Message message = 2;  // 消息内容，单条最大 64KB
-  bool sync = 3;  // 是否同步等待持久化，默认 false
+  bool sync = 3;  // 必须为 false：不提供落库后才应答的同步发送，true 以 INVALID_ARGUMENT 拒绝（批量里该条进 failures）；可靠性边界见响应 durability
   string svid = 4;  // 业务系统标识（与 RouterUpstream.RouteMessageRequest.svid 对齐），可空表示默认
 }
 
