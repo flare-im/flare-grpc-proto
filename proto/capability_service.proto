@@ -138,6 +138,9 @@ message DispatchCapabilityRequest {
   /// JSON 对象字符串；建议首层含 schema 或 version 字段便于多版本共存。
   string payload_json = 5;
   string request_id = 6;  // 幂等与链路追踪，应与 gRPC metadata 一致或可关联
+  // 插件卡片动作或详情来自的那条消息（server_msg_id）；非卡片调用为空。Core 只接受实体绑定的那条卡片
+  // 发起的、针对该实体的调用（伪造或转发的副本拒绝 PLUGIN_CARD_UNBOUND）。
+  string message_id = 7;
 }
 
 // Dispatch 执行结果；失败时 success=false 且 error_message 可读，严重错误仍可用 Status。
