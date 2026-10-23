@@ -34,6 +34,15 @@ service ConversationReadService {
   rpc ListConversationParticipants(ListConversationParticipantsRequest) returns (ListConversationParticipantsResponse);  // 分页获取会话参与者（唯一成员读路径）
 }
 
+/// MessageReadReceiptService：群聊消息的已读回执读（只读，与 ConversationReadService 同一身份边界）。
+/// 发送者查看自己消息的「N 人未读 / 全部已读」与已读名单。
+service MessageReadReceiptService {
+  // 群聊里调用者自己发送的一批消息的已读摘要
+  rpc GetMessageReadSummaries(GetMessageReadSummariesRequest) returns (GetMessageReadSummariesResponse);
+  // 群聊里调用者自己发送的一条消息的已读或未读成员（分页）
+  rpc ListMessageReaders(ListMessageReadersRequest) returns (ListMessageReadersResponse);
+}
+
 /// ConversationManageService：会话写模型与侧效应（创建/更新/删除、参与者、同步游标、已读、在线、搜索等）
 service ConversationManageService {
   rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);  // 创建会话
@@ -132,6 +141,65 @@ message ListConversationParticipantsResponse {
   int32 member_count = 6;
   reserved 7 to 49;
   map<string, string> ext = 50;
+}
+
+// --- 群聊消息已读回执（发送者查看「N 人未读 / 全部已读」与已读名单）---
+//
+// 读者的已读位置是成员的已读水位（已读回执推进的 last_read_seq）：水位不低于消息 seq 即已读。
+// 只回答群聊里调用者本人发送的消息；成员数超过服务端上限（500）的群 available=false，客户端
+// 不显示。成员指未退出的参与者，隐藏了会话（从列表删除）的也算。调用者须是会话成员，否则与
+// 会话不存在一样回 NOT_FOUND。
+// 单聊不走这里：会话摘要的 attributes["peer_read_seq"] 即对方已读位置。
+
+/// 一批消息的已读摘要请求。
+message GetMessageReadSummariesRequest {
+  string conversation_id = 1;
+  repeated string server_msg_ids = 2;  // 1..=50 个互不相同的服务端消息 ID（通常是可见页）
+}
+
+/// 一条消息的已读摘要。total = read_count + unread_count。
+message MessageReadSummary {
+  string server_msg_id = 1;
+  uint32 read_count = 2;    // 已读水位不低于消息 seq 的成员数
+  uint32 unread_count = 3;  // 其余能看到这条消息的成员数
+  uint32 total = 4;         // 除发送者外、能看到这条消息的成员数
+}
+
+/// 一批消息的已读摘要响应。
+message GetMessageReadSummariesResponse {
+  string conversation_id = 1;
+  // false：不是群聊，或成员数超过上限；此时 summaries 为空，客户端不显示已读摘要
+  bool available = 2;
+  // 只含本会话里调用者本人发送、未撤回也未删除的消息；请求里的其他 ID 不出现
+  repeated MessageReadSummary summaries = 3;
+}
+
+/// 已读名单的分栏。
+enum MessageReaderState {
+  MESSAGE_READER_STATE_UNSPECIFIED = 0;  // 非法
+  MESSAGE_READER_STATE_READ = 1;         // 已读
+  MESSAGE_READER_STATE_UNREAD = 2;       // 未读
+}
+
+/// 一条消息的已读或未读成员请求。
+message ListMessageReadersRequest {
+  string conversation_id = 1;
+  string server_msg_id = 2;
+  MessageReaderState state = 3;
+  string cursor = 4;  // 不透明游标；首页为空
+  int32 limit = 5;    // 0 = 50，最大 200
+}
+
+/// 一条消息的已读或未读成员响应：按 user_id 升序分页。
+message ListMessageReadersResponse {
+  string conversation_id = 1;
+  string server_msg_id = 2;
+  // false：不是群聊，或成员数超过上限；此时 user_ids 为空、summary 不设
+  bool available = 3;
+  MessageReadSummary summary = 4;  // 两栏的计数
+  repeated string user_ids = 5;
+  string next_cursor = 6;
+  bool has_more = 7;
 }
 
 // --- 会话写模型与公共结构（创建/更新返回、参与者、策略、设备、游标）---

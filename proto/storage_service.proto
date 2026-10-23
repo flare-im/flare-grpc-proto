@@ -43,6 +43,13 @@ service StorageReaderService {
   rpc GetConversationMessageHead(GetConversationMessageHeadRequest) returns (GetConversationMessageHeadResponse);
 }
 
+// StorageMessageLookupService：按 ID 批量查消息所在的会话，供写路径授权用（例如核对一条已读
+// 回执点名的消息都属于这个会话），一次一批，不返回消息内容。单独成服务：已有的
+// StorageReaderService 实现及其测试替身不需要改动。
+service StorageMessageLookupService {
+  rpc LocateMessages(LocateMessagesRequest) returns (LocateMessagesResponse);
+}
+
 
 // ----------------------------------------------------------------------------
 // 枚举与公共模型
@@ -195,6 +202,22 @@ message GetMessageRequest {
 // 获取单条消息响应
 message GetMessageResponse {
   flare.common.v1.Message message = 1;  // 消息
+}
+
+// 批量定位消息请求：1..=50 个互不相同的服务端消息 ID，只按 server_id 匹配。
+message LocateMessagesRequest {
+  repeated string server_msg_ids = 1;
+}
+
+// 一条已落库消息所在的会话。
+message LocatedMessage {
+  string server_msg_id = 1;
+  string conversation_id = 2;
+}
+
+// 批量定位消息响应：只含已落库的那些 ID，顺序不保证；还没落库的不出现。
+message LocateMessagesResponse {
+  repeated LocatedMessage messages = 1;
 }
 
 // ----------------------------------------------------------------------------

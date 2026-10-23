@@ -1052,6 +1052,10 @@ message PluginRuntimeInspectResponse {
   string artifact_digest = 5;
   bool ready = 6;
   bool draining = 7;
+  // Platform protocols this deployment serves besides its manifest operations, for example
+  // "flare.plugin.data.v1" (data export). The platform enables a version that promises one only
+  // on a deployment reporting it.
+  repeated string protocols = 8;
 }
 message PluginTenantState {
   string deployment_id = 1;

@@ -33,6 +33,17 @@
 
   都是新服务,没有往已有服务里加方法:已有的 `OnlineService`、`CapabilityService`、
   会话读写服务实现不需要改动就能继续编译。
+- `PluginRuntimeInspectResponse.protocols`(字段 8):部署除 manifest 操作外提供的平台协议,
+  例如数据导出 `flare.plugin.data.v1`;平台只在报告了该协议的部署上启用承诺数据导出的版本。
+  新增字段,旧部署不填即视为没有。
+- `MessageReadReceiptService { GetMessageReadSummaries, ListMessageReaders }`(会话服务承载):
+  群聊里发送者查看自己消息的已读摘要(已读 / 未读 / 总数,一次一批)与已读或未读成员分页。
+  按成员的已读水位计数;在席成员超过服务端上限的群回 `available=false`。新服务,已有的
+  会话读服务及其测试替身不需要改动。
+- `StorageMessageLookupService.LocateMessages`(Storage Reader 承载):按服务端消息 ID 一次
+  查一批(至多 50 个)已落库消息所在的会话,不返回内容。供写路径授权一次核对一批 ID,
+  例如已读回执点名的消息都要属于本会话。新服务,已有的 `StorageReaderService` 实现与测试
+  替身不需要改动。
 
 ## 2.1.0 — 未发布
 
