@@ -7,6 +7,11 @@
 
 ### 新增
 
+- `AccessGateway.PushCapability(PushCapabilityRequest)` 与 `PushService.PushCapability`
+  (`PushCapabilityRequest`/`PushCapabilityResponse`)：插件实时包（宿主能力 `im.realtime.deliver`）
+  原样作为 `DataPacket.capability` 下发给所列用户的全部在线连接；只在线、不入库、不做离线推送、至多一次。
+  实现 `AccessGateway` 或 `PushService` 的服务端与测试替身需要补上新方法。
+
 - `control_plane.proto`(`flare.control.v1`):控制面 → 数据面的租户/功能开关投影协议
   `TenantProjection { UpsertTenant, UpsertFeatureFlags, GetVersions }`。真源在控制面
   (flare-im-console),Social 与核各实现一份接收端,按 `version` 幂等。整包派生 serde。
@@ -44,6 +49,11 @@
   查一批(至多 50 个)已落库消息所在的会话,不返回内容。供写路径授权一次核对一批 ID,
   例如已读回执点名的消息都要属于本会话。新服务,已有的 `StorageReaderService` 实现与测试
   替身不需要改动。
+
+### 移除
+
+- `sfu_control.proto`（`flare.sfu.control.v1`）与 crate feature `sfu_control`：通话改为托管插件
+  `flare.call`，Core 不再经 SFU 控制面契约调用媒体服务。
 
 ## 2.1.0 — 未发布
 

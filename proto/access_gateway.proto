@@ -76,6 +76,10 @@ service AccessGateway {
   rpc PushAck(PushAckRequest) returns (PushAckResponse);
   // 推送自定义数据（common.CustomData，不占会话 seq、不落事件表）
   rpc PushCustom(PushCustomRequest) returns (PushResponse);
+  // Plugin realtime packet: written as DataPacket.capability to every connection of each listed
+  // user on this node, in the signed tenant. Online only: never stored, never pushed offline, at
+  // most once, no ACK. Same producer rule as the other Push RPCs (flare-push-worker).
+  rpc PushCapability(PushCapabilityRequest) returns (PushResponse);
 
   // 统一读扩散投递：按会话扇给"本网关节点订阅该会话的在线连接"，上游无需解析收件人。
   // 上游（push-worker）对每条消息只发一次、广播到所有网关节点；各节点按本地订阅过滤（无订阅则空操作）。
@@ -135,6 +139,12 @@ message PushCustomRequest {
   repeated string user_ids = 1;                // 目标用户 ID 列表（至少一个）
   flare.common.v1.CustomData custom_data = 2;  // 与 common/data CustomData 一致
   PushOptions options = 3;
+}
+
+message PushCapabilityRequest {
+  repeated string user_ids = 1;                    // 目标用户 ID 列表（至少一个）
+  flare.common.v1.CapabilityPacket packet = 2;     // 原样下发为 DataPacket.capability
+  PushOptions options = 3;                         // device_ids / platforms 过滤；expire_at_ms 过期即丢
 }
 
 // 统一读扩散投递请求：按会话投递，无 user_ids（网关用本地会话订阅表解析在线连接）。
