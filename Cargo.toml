@@ -18,11 +18,6 @@ tonic = "0.14"
 tonic-prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 
-[features]
-default = []
-# 独立 SFU 控制面 proto（`sfu_control.proto`）。核心默认不启用；仅 SFU 插件/进程显式打开。
-sfu_control = []
-
 [build-dependencies]
 flare-proto = { version = "2.1.0", path = "../flare-proto" }
 tonic-prost-build = "0.14"

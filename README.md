@@ -65,7 +65,6 @@ The files currently compiled by `build.rs` (order matters for dependency resolut
 - `router.proto`
 - `storage_service.proto`
 - `sync_service.proto`
-- `sfu_control.proto`
 
 The `import` statements for base types are provided by **`flare-proto/proto`**;
 at compile time the include path is "base directory first, then this directory",

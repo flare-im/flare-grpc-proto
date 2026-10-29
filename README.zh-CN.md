@@ -59,7 +59,6 @@ flare-grpc-proto/
 - `router.proto`
 - `storage_service.proto`
 - `sync_service.proto`
-- `sfu_control.proto`
 
 基础类型的 `import` 由 **`flare-proto/proto`** 提供；编译时 include 路径为「基础目录优先，再本目录」，以减少同名 import 歧义。
 

@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_proto = flare_proto_include_dir(&manifest);
     let grpc_proto = manifest.join("proto");
 
-    let mut protos = vec![
+    let protos = vec![
         grpc_proto.join("access_gateway.proto"),
         grpc_proto.join("control_plane.proto"),
         grpc_proto.join("conversation_service.proto"),
@@ -18,9 +18,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         grpc_proto.join("storage_service.proto"),
         grpc_proto.join("sync_service.proto"),
     ];
-    if std::env::var("CARGO_FEATURE_SFU_CONTROL").is_ok() {
-        protos.push(grpc_proto.join("sfu_control.proto"));
-    }
 
     for p in &protos {
         println!("cargo:rerun-if-changed={}", p.display());
@@ -100,13 +97,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".flare.control.v1",
         "#[derive(serde::Serialize, serde::Deserialize)]",
     );
-
-    if std::env::var("CARGO_FEATURE_SFU_CONTROL").is_ok() {
-        config = config.type_attribute(
-            ".flare.sfu.control.v1",
-            "#[derive(serde::Serialize, serde::Deserialize)]",
-        );
-    }
 
     let proto_paths: Vec<_> = protos
         .iter()

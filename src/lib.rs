@@ -74,15 +74,6 @@ pub mod flare {
             tonic::include_proto!("flare.sync.v1");
         }
     }
-
-    #[cfg(feature = "sfu_control")]
-    pub mod sfu {
-        pub mod control {
-            pub mod v1 {
-                tonic::include_proto!("flare.sfu.control.v1");
-            }
-        }
-    }
 }
 
 pub mod signaling {
@@ -132,12 +123,6 @@ pub mod control {
     pub use crate::flare::control::v1::*;
 }
 
-/// SFU 插件控制面（`sfu_control.proto` → `flare.sfu.control.v1`）。需启用 crate feature `sfu_control`。
-#[cfg(feature = "sfu_control")]
-pub mod sfu_control {
-    pub use crate::flare::sfu::control::v1::*;
-}
-
 pub use flare_proto::PushTaskPayloadKind;
 pub use flare_proto::common::{
     AppCardAction, AppCardContent, AudioContent, AudioInfo, AuditContext, CapabilityPacket,
@@ -174,14 +159,13 @@ pub use signaling::router::{
 };
 
 pub use push::{
-    DevicePushProvider, Notification as PushNotificationContent,
-    PushCustomRequest as PushPushCustomRequest, PushCustomResponse as PushPushCustomResponse,
-    PushFailure, PushMessageRequest as PushPushMessageRequest,
-    PushMessageResponse as PushPushMessageResponse,
+    DevicePushProvider, InspectDevicePushBindingRequest, InspectDevicePushBindingResponse,
+    Notification as PushNotificationContent, PushCustomRequest as PushPushCustomRequest,
+    PushCustomResponse as PushPushCustomResponse, PushFailure,
+    PushMessageRequest as PushPushMessageRequest, PushMessageResponse as PushPushMessageResponse,
     PushNotificationRequest as PushPushNotificationRequest,
     PushNotificationResponse as PushPushNotificationResponse, PushOptions, QueryPushStatusRequest,
     QueryPushStatusResponse, RegisterDevicePushTokenRequest, RegisterDevicePushTokenResponse,
-    InspectDevicePushBindingRequest, InspectDevicePushBindingResponse,
     RevokeDevicePushBindingRequest, RevokeDevicePushBindingResponse,
 };
 
